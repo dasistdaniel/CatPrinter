@@ -20,7 +20,9 @@ from .printer import DEFAULT_DENSITY, DPI, MODES, Printer, PrinterError, prepare
 
 log = logging.getLogger("server")
 
-CONFIG_DIR = os.path.join(os.environ.get("APPDATA", os.path.expanduser("~")), "CatPrinterDriver")
+# Portable Variante: Einstellungen neben der exe (setzt packaging/launcher.py)
+CONFIG_DIR = os.environ.get("CATPRINTER_HOME") or os.path.join(
+    os.environ.get("APPDATA", os.path.expanduser("~")), "CatPrinterDriver")
 CONFIG_FILE = os.path.join(CONFIG_DIR, "config.json")
 
 DEFAULT_CONFIG = {
@@ -105,10 +107,22 @@ def load_config():
     except FileNotFoundError:
         pass
     if not cfg.get("uuid"):
-        # Einmal erzeugen und behalten, sonst hält Windows den Drucker für ein neues Gerät
-        cfg["uuid"] = str(uuid.uuid4())
+        # Einmal erzeugen und behalten, sonst hält Windows den Drucker für ein neues Gerät.
+        # Portable: die ID einer vorhandenen Installation übernehmen (gleicher Windows-Drucker)
+        cfg["uuid"] = _installed_uuid() or str(uuid.uuid4())
         save_config(cfg)
     return cfg
+
+
+def _installed_uuid():
+    default = os.path.join(os.environ.get("APPDATA", os.path.expanduser("~")), "CatPrinterDriver", "config.json")
+    if os.path.normcase(default) == os.path.normcase(CONFIG_FILE):
+        return None
+    try:
+        with open(default, encoding="utf-8") as f:
+            return json.load(f).get("uuid")
+    except (OSError, ValueError):
+        return None
 
 
 def save_config(cfg, path=None):

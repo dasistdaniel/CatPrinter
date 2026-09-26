@@ -60,6 +60,24 @@ die installierte; Einstellungen, Verlauf und der Windows-Drucker bleiben.
 Entfernt den Drucker (Adminabfrage) und fragt, ob Einstellungen, Log und
 Verlauf gelöscht werden sollen.
 
+### Ohne Installation (portabel)
+
+- **Einfach nur starten:** Im Installationsdialog **Nein** wählen – die exe
+  läuft dann von ihrem Ort aus, ohne Autostart, Startmenü-Eintrag oder Kopie.
+  Einstellungen liegen wie gewohnt in `%APPDATA%\CatPrinterDriver`.
+- **Voll portabel** (z. B. auf einem USB-Stick): eine leere Datei namens
+  `portable` neben die exe legen oder die exe z. B. `CatPrinter-portable.exe`
+  nennen. Dann fragt sie nie nach Installation und speichert Einstellungen,
+  Log und Verlauf im Ordner `CatPrinterData` neben der exe – auf dem PC wird
+  nichts eingetragen.
+
+Für den Druck aus anderen Programmen braucht es trotzdem den Windows-Drucker
+„Cat Printer“. Fehlt er, bietet die portable exe beim Start an, ihn anzulegen
+(Adminabfrage), und zeigt im Tray-Menü *Windows-Drucker einrichten*. Ist Cat
+Printer auf dem PC auch installiert, nutzt die portable Kopie denselben
+Drucker. Entfernen: Ordner löschen und – falls der Drucker angelegt wurde –
+als Administrator `Remove-Printer "Cat Printer"` ausführen.
+
 > [!WARNING]
 > Die exe ist **nicht signiert**. Nach dem Herunterladen zeigt Windows
 > SmartScreen eventuell *„Der Computer wurde durch Windows geschützt“* –

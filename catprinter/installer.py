@@ -30,7 +30,9 @@ STARTUP_LNK = "Cat Printer Server.lnk"
 STARTMENU_LNK = "Cat Printer.lnk"
 UNINSTALL_KEY = r"Software\Microsoft\Windows\CurrentVersion\Uninstall\CatPrinterDriver"
 
-MB_YESNO, MB_ICONINFO, MB_ICONQUESTION, MB_ICONWARNING, IDYES = 0x4, 0x40, 0x20, 0x30, 6
+MB_YESNO, MB_YESNOCANCEL, MB_ICONINFO, MB_ICONQUESTION, MB_ICONWARNING = 0x4, 0x3, 0x40, 0x20, 0x30
+IDYES, IDNO = 6, 7
+RUN_WITHOUT_INSTALL = "run"  # Rückgabe von install(): Nutzer will ohne Installation starten
 
 
 def _box(text, flags=MB_ICONINFO):
@@ -137,6 +139,13 @@ def printer_exists():
     return _ps(f"if (Get-Printer -Name {_q(PRINTER_NAME)} -ErrorAction SilentlyContinue) {{ 'ja' }}") == "ja"
 
 
+def add_printer():
+    """Legt den Windows-Drucker an (UAC). Der Server muss dabei laufen. True bei Erfolg."""
+    url, _port = _base_url()
+    _elevated(f"Add-Printer -Name {_q(PRINTER_NAME)} -IppURL {_q(url.rstrip('/') + '/ipp/print')}")
+    return printer_exists()
+
+
 def _elevated(script):
     """Führt PowerShell mit Adminrechten aus (UAC-Abfrage). False, wenn abgelehnt."""
     inner = script.replace('"', '\\"')
@@ -167,7 +176,13 @@ def install(ask=True):
                 "• Eintrag im Startmenü und unter „Apps & Features“\n")
         if not printer_exists():
             text += "• Drucker „Cat Printer“ in Windows anlegen (Windows fragt nach Adminrechten)\n"
-        if _box(text, MB_YESNO | MB_ICONQUESTION) != IDYES:
+        text += ("\nJa = installieren\n"
+                 "Nein = ohne Installation starten (nur jetzt, kein Autostart)\n"
+                 "Abbrechen = nichts tun")
+        answer = _box(text, MB_YESNOCANCEL | MB_ICONQUESTION)
+        if answer == IDNO:
+            return RUN_WITHOUT_INSTALL
+        if answer != IDYES:
             return 1
 
     stop_running()
@@ -185,11 +200,9 @@ def install(ask=True):
     printer_note = ""
     if not running:
         printer_note = "\n\nDer Server ist nicht gestartet – siehe Log in " + CONFIG_DIR
-    elif not printer_exists():
-        _elevated(f"Add-Printer -Name {_q(PRINTER_NAME)} -IppURL {_q(url.rstrip('/') + '/ipp/print')}")
-        if not printer_exists():
-            printer_note = ("\n\nDer Drucker konnte nicht angelegt werden (Adminrechte abgelehnt?). "
-                            "Starte die Installation erneut, um es nochmal zu versuchen.")
+    elif not printer_exists() and not add_printer():
+        printer_note = ("\n\nDer Drucker konnte nicht angelegt werden (Adminrechte abgelehnt?). "
+                        "Starte die Installation erneut, um es nochmal zu versuchen.")
     log.info("Installiert: %s (%s)", INSTALLED_EXE, __version__)
     if ask:
         _box(f"Cat Printer ist {'aktualisiert' if update else 'installiert'}.\n\n"

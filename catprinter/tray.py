@@ -13,7 +13,7 @@ from PIL import Image, ImageDraw
 
 from .pages import short_test_page
 from .printer import battery_volts
-from .server import CONFIG_DIR, CONFIG_FILE, load_config, serve
+from .server import CONFIG_DIR, CONFIG_FILE, load_config, save_config, serve
 
 log = logging.getLogger("tray")
 
@@ -44,8 +44,10 @@ def _message_box(text, title="Cat Printer"):
 
 
 class TrayApp:
-    def __init__(self, save_jobs_dir=None):
+    def __init__(self, save_jobs_dir=None, offer_printer_setup=False):
         self.save_jobs_dir = save_jobs_dir
+        self.offer_printer_setup = offer_printer_setup
+        self.printer_missing = False
         self.state = "ready"
         self.detail = ""
         self.volts = None
@@ -147,6 +149,8 @@ class TrayApp:
             Item("Log öffnen", lambda: _notepad(LOG_FILE)),
             Item("Einstellungen bearbeiten", lambda: _notepad(CONFIG_FILE)),
             Item("Server neu starten", lambda: threading.Thread(target=self.restart, daemon=True).start()),
+            Item("Windows-Drucker einrichten …", lambda: threading.Thread(
+                target=self._setup_printer, daemon=True).start(), visible=lambda _i: self.printer_missing),
             pystray.Menu.SEPARATOR,
             Item("Beenden", self._quit),
         )
@@ -163,6 +167,34 @@ class TrayApp:
     def _quit(self):
         self.stop_server()
         self.icon.stop()
+
+    # ------------------------------------------------------------ Drucker (portable)
+
+    def _check_printer(self):
+        """Nicht installierte exe: fehlt der Windows-Drucker, einmal anbieten, ihn anzulegen."""
+        from .installer import printer_exists
+        self.printer_missing = not printer_exists()
+        self.icon.update_menu()
+        if self.printer_missing and not self.cfg.get("printer_setup_declined"):
+            self._setup_printer(first_time=True)
+
+    def _setup_printer(self, first_time=False):
+        from .installer import IDYES, MB_ICONQUESTION, MB_YESNO, _box, add_printer
+        text = ("Der Windows-Drucker „Cat Printer“ fehlt noch – ohne ihn taucht der Drucker "
+                "nicht im Druckdialog auf.\n\nJetzt anlegen? Windows fragt dafür nach Adminrechten.")
+        if first_time:
+            text += "\n\n(Später geht das auch über das Tray-Menü.)"
+        if _box(text, MB_YESNO | MB_ICONQUESTION) != IDYES:
+            if first_time:
+                self.cfg["printer_setup_declined"] = True  # nicht bei jedem Start erneut fragen
+                save_config(self.cfg, self.service.config_file)
+            return
+        if add_printer():
+            self.printer_missing = False
+            self.icon.update_menu()
+            self.icon.notify("Drucker „Cat Printer“ ist eingerichtet.", "Cat Printer")
+        else:
+            self.icon.notify("Drucker wurde nicht angelegt (Adminrechte abgelehnt?).", "Cat Printer")
 
     # ------------------------------------------------------------ Start
 
@@ -181,7 +213,13 @@ class TrayApp:
                          "Der Cat-Printer-Server kann nicht starten.")
             return 1
         log.info("Tray gestartet")
-        self.icon.run()
+
+        def setup(icon):
+            icon.visible = True
+            if self.offer_printer_setup:
+                threading.Thread(target=self._check_printer, daemon=True).start()
+
+        self.icon.run(setup=setup)
         return 0
 
 

@@ -66,6 +66,23 @@ To **uninstall**, use *Settings → Apps → Cat Printer (CatPrinterDriver)*. It
 removes the printer (admin prompt) and asks whether to delete settings,
 log and history.
 
+### Without installing (portable)
+
+- **Just run it once:** in the install dialog choose **No** – the exe starts
+  from where it is, without autostart, Start menu entry or copying itself.
+  Settings are stored in `%APPDATA%\CatPrinterDriver` as usual.
+- **Fully portable** (e.g. on a USB stick): put an empty file named
+  `portable` next to the exe, or name the exe e.g. `CatPrinter-portable.exe`.
+  It then never asks to install and keeps settings, log and history in a
+  `CatPrinterData` folder next to the exe – nothing is registered on the PC.
+
+The Windows printer "Cat Printer" is still needed to print from other
+programs. If it is missing, the portable exe offers to add it on start
+(admin prompt) and shows *Set up Windows printer* in the tray menu. On a PC
+where Cat Printer is also installed, the portable copy reuses the installed
+printer. To remove a portable copy, delete its folder and, if you added the
+printer, run `Remove-Printer "Cat Printer"` as administrator.
+
 > [!WARNING]
 > The exe is **not code-signed**. When you download it, Windows SmartScreen
 > may show *"Windows protected your PC"* – click *More info → Run anyway*.

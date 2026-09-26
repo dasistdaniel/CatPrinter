@@ -1,6 +1,7 @@
 """python -m catprinter [serve|tray|status|test|image DATEI|calibrate WERTE...] [--verbose] [--port COMx]"""
 import argparse
 import logging
+import os
 import sys
 import threading
 
@@ -15,10 +16,11 @@ def main():
     ap = argparse.ArgumentParser(prog="catprinter")
     # Die exe (ohne Konsole) startet per Doppelklick: installiert -> Tray, sonst Installation
     frozen = getattr(sys, "frozen", False)
+    portable = os.environ.get("CATPRINTER_PORTABLE") == "1"
     default = "serve"
     if frozen:
         from .installer import is_installed_copy
-        default = "tray" if is_installed_copy() else "install"
+        default = "tray" if portable or is_installed_copy() else "install"
     ap.add_argument("command", nargs="?", default=default,
                     choices=["serve", "tray", "status", "test", "image", "calibrate", "install", "uninstall"])
     ap.add_argument("file", nargs="*", help="Bilddatei (image) bzw. Dichtewerte (calibrate)")
@@ -33,7 +35,6 @@ def main():
 
     if args.command in ("tray", "install", "uninstall") and not args.log_file:
         # Tray läuft ohne Konsole (pythonw) – ohne Datei ginge das Log verloren
-        import os
         os.makedirs(CONFIG_DIR, exist_ok=True)
         args.log_file = os.path.join(CONFIG_DIR, "server.log")
     log_kwargs = {"filename": args.log_file, "encoding": "utf-8"} if args.log_file else {}
@@ -50,8 +51,18 @@ def main():
             print("install/uninstall gibt es nur in der exe (build.ps1). "
                   "Für die Python-Variante: autostart.ps1 und Add-Printer, siehe README.")
             return 1
+        if portable:
+            installer._box("Das ist die portable Variante – sie wird nicht installiert.\n"
+                           "Zum Installieren die Datei „portable“ neben der exe entfernen "
+                           "bzw. die exe umbenennen.")
+            return 1
         try:
-            return installer.install() if args.command == "install" else installer.uninstall()
+            if args.command == "uninstall":
+                return installer.uninstall()
+            result = installer.install()
+            if result != installer.RUN_WITHOUT_INSTALL:
+                return result
+            args.command = "tray"  # "Nein" im Dialog: ohne Installation starten
         except Exception as e:  # noqa: BLE001 – dem Nutzer zeigen statt still abzubrechen
             logging.exception("%s fehlgeschlagen", args.command)
             installer._box(f"Fehler bei der {'Installation' if args.command == 'install' else 'Deinstallation'}:"
@@ -60,8 +71,10 @@ def main():
 
     if args.command == "tray":
         from .tray import TrayApp  # pystray nur laden, wenn gebraucht
-        logging.info("Konfiguration: %s", CONFIG_FILE)
-        return TrayApp(args.save_jobs).run()
+        logging.info("Konfiguration: %s%s", CONFIG_FILE, " (portable)" if portable else "")
+        # Nicht installierte exe (portable / "ohne Installation"): fehlenden Drucker anbieten
+        offer_printer = frozen and not is_installed_copy()
+        return TrayApp(args.save_jobs, offer_printer_setup=offer_printer).run()
 
     if args.command == "serve":
         logging.info("Konfiguration: %s", CONFIG_FILE)
