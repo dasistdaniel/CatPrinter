@@ -63,10 +63,16 @@ versions may behave differently.
 - **Power limit on fully black rows:** rows in which (almost) all 384 dots are
   black print slightly lighter than rows with ≤ 70 % coverage – visible as
   thin light lines inside large black areas. The raster data is correct; this
-  is the battery/head not delivering enough heat. Pacing and block layout
-  made no difference.
+  is the battery not delivering enough power. Pacing and block layout
+  made no difference; printing with the USB cable plugged in (charging,
+  7.18 V) removed the lines in a test with a full-width black block.
 - Battery voltage drops noticeably during long sessions (7.28 V → 6.98 V in
   ~20 minutes of testing), and prints get lighter with it.
+- **USB is charge-only.** When plugged into a PC, Windows reports
+  *Unknown USB device (device descriptor request failed)*,
+  `USB\VID_0000&PID_0002` – the placeholder for a device that doesn't answer
+  on the data lines. The entry disappears when the printer is unplugged.
+  There is no USB data interface; printing is only possible via Bluetooth.
 
 ## 3. Windows side (IPP)
 

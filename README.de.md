@@ -132,7 +132,8 @@ nach Änderungen Server neu starten, z. B. ab- und wieder anmelden):
 | Aufträge hängen dauerhaft | Server läuft nicht – starten oder Autostart einrichten. |
 | `Add-Printer`: Zugriff verweigert | PowerShell als Administrator starten. |
 | Druck zu blass | Akku laden; `density` erhöhen (mit `calibrate` testen). |
-| Dünne hellere Linien in großen, komplett schwarzen Flächen | Hardwaregrenze: Zeilen, in denen alle 384 Punkte schwarz sind, bekommen im Akkubetrieb etwas weniger Heizleistung. Text und normale Bilder sind nicht betroffen. |
+| Dünne hellere Linien in großen, komplett schwarzen Flächen | Zeilen, in denen alle 384 Punkte schwarz sind, bekommen im Akkubetrieb etwas weniger Heizleistung. Solche Bilder mit angestecktem USB-Kabel (Laden) drucken – im Test waren die Linien dann weg. Text und normale Bilder sind nicht betroffen. |
+| „Unbekanntes USB-Gerät“ beim Anstecken | Normal: Der USB-Anschluss lädt nur, er hat keine Datenverbindung. Drucken geht nur über Bluetooth. |
 | Alles entfernen | `Remove-Printer "Cat Printer"` (als Admin), `.\autostart.ps1 -Remove`, Ordner `%APPDATA%\CatPrinterDriver` löschen. |
 
 ## Tests

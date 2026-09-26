@@ -139,7 +139,8 @@ Restart the server after changing it.
 | Jobs stay "printing" forever | The server isn't running – start it or set up the autostart. |
 | `Add-Printer`: access denied | Run PowerShell as Administrator. |
 | Output too light | Charge the battery; raise `density` (see `calibrate`). |
-| Thin lighter lines in large all-black areas | Hardware limit: rows where all 384 dots are black get slightly less heat on battery power. Text and normal images are not affected. |
+| Thin lighter lines in large all-black areas | Rows where all 384 dots are black get slightly less heat on battery power. Print such images with the USB cable plugged in (charging) – in our test the lines disappeared. Text and normal images are not affected. |
+| "Unknown USB device" when plugged in | Normal: the USB port only charges the printer, it has no data connection. Printing works only via Bluetooth. |
 | Remove everything | `Remove-Printer "Cat Printer"` (as admin), `.\autostart.ps1 -Remove`, delete `%APPDATA%\CatPrinterDriver`. |
 
 ## Development
