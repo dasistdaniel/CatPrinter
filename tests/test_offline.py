@@ -384,6 +384,12 @@ class ServerTest(unittest.TestCase):
         self.post_json("settings", {"keep_history": False})
         self.assertFalse(os.path.exists(self.svc.history.directory))  # ausschalten löscht alles
 
+    def test_quit_action_emits_event(self):
+        events = []
+        self.svc.listeners.append(lambda event, **_d: events.append(event))
+        self.assertEqual(self.post_json("quit", {})[0], 202)
+        self.wait_until(lambda: "quit" in events)
+
     def test_foreign_host_rejected(self):
         # DNS-Rebinding: fremde Domain, die auf 127.0.0.1 zeigt
         headers = {"Host": f"evil.example:{self.port}"}

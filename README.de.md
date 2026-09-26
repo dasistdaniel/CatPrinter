@@ -38,10 +38,36 @@ gekoppelte Drucker in Windows einen Port *„Standardmäßige Seriell-über-Blue
 ## Voraussetzungen
 
 - Windows 11 (Windows 10 evtl., ungetestet)
-- Python 3.10+
 - Drucker in *Einstellungen → Bluetooth und Geräte* gekoppelt
+- Nur für die Python-Variante: Python 3.10+
 
-## Einrichtung
+## Installation (Windows-Programm)
+
+1. `CatPrinter.exe` besorgen – von der Seite
+   [Releases](https://github.com/dasistdaniel/CatPrinterDriver/releases), falls vorhanden,
+   oder selbst bauen (siehe *exe bauen*).
+2. Doppelklicken und **Installieren** bestätigen. Das Programm
+   - kopiert sich nach `%LOCALAPPDATA%\Programs\CatPrinter` (ohne Adminrechte),
+   - startet bei jeder Anmeldung (Tray-Symbol) und bekommt einen Startmenü-Eintrag,
+   - legt den Drucker **„Cat Printer“** in Windows an, falls er noch fehlt –
+     nur dafür fragt Windows nach Adminrechten,
+   - erscheint unter *Einstellungen → Apps* zum Deinstallieren.
+3. In jedem Programm auf „Cat Printer“ drucken.
+
+**Aktualisieren:** einfach eine neuere `CatPrinter.exe` starten – sie ersetzt
+die installierte; Einstellungen, Verlauf und der Windows-Drucker bleiben.
+**Deinstallieren:** *Einstellungen → Apps → Cat Printer (CatPrinterDriver)*.
+Entfernt den Drucker (Adminabfrage) und fragt, ob Einstellungen, Log und
+Verlauf gelöscht werden sollen.
+
+> [!WARNING]
+> Die exe ist **nicht signiert**. Nach dem Herunterladen zeigt Windows
+> SmartScreen eventuell *„Der Computer wurde durch Windows geschützt“* –
+> *Weitere Informationen → Trotzdem ausführen* klicken. Manche Virenscanner
+> melden mit PyInstaller gebaute Programme fälschlich. Wer das nicht möchte,
+> baut die exe selbst oder nutzt die Python-Variante.
+
+## Python-Variante (aus dem Quellcode)
 
 ```powershell
 git clone https://github.com/dasistdaniel/CatPrinterDriver.git
@@ -68,11 +94,12 @@ pip install -r requirements.txt
    .\autostart.ps1 -Remove    # wieder entfernen
    ```
    Log: `%APPDATA%\CatPrinterDriver\server.log`. Wird der Projektordner
-   verschoben, `autostart.ps1` einfach erneut ausführen.
+   verschoben, `autostart.ps1` einfach erneut ausführen. (Nicht zusammen mit
+   der installierten exe nutzen – beide verwenden denselben Autostart-Eintrag.)
 
 ## Tray-Symbol
 
-`python -m catprinter tray` (so startet ihn der Autostart) führt den
+Die installierte exe (oder `python -m catprinter tray`) führt den
 Druckserver zusammen mit einem Katzen-Symbol im Infobereich der Taskleiste
 aus. Der Punkt zeigt den Zustand: 🟢 bereit · 🔵 druckt · 🔴 Fehler.
 
@@ -174,7 +201,20 @@ starten* wählen):
 | Druck zu blass | Akku laden; `density` erhöhen (mit `calibrate` testen). |
 | Dünne hellere Linien in großen, komplett schwarzen Flächen | Zeilen, in denen alle 384 Punkte schwarz sind, bekommen im Akkubetrieb etwas weniger Heizleistung. Solche Bilder mit angestecktem USB-Kabel (Laden) drucken – im Test waren die Linien dann weg. Text und normale Bilder sind nicht betroffen. |
 | „Unbekanntes USB-Gerät“ beim Anstecken | Normal: Der USB-Anschluss lädt nur, er hat keine Datenverbindung. Drucken geht nur über Bluetooth. |
-| Alles entfernen | `Remove-Printer "Cat Printer"` (als Admin), `.\autostart.ps1 -Remove`, Ordner `%APPDATA%\CatPrinterDriver` löschen. |
+| Alles entfernen | exe: über *Einstellungen → Apps* deinstallieren. Python-Variante: `Remove-Printer "Cat Printer"` (als Admin), `.\autostart.ps1 -Remove`, Ordner `%APPDATA%\CatPrinterDriver` löschen. |
+
+## exe bauen
+
+```powershell
+pip install -r requirements.txt pyinstaller
+.\build.ps1
+```
+
+Führt die Tests aus, erzeugt das Symbol und baut mit PyInstaller
+`dist\CatPrinter.exe` (eine Datei, ca. 28 MB, ohne Konsolenfenster). Ein
+Doppelklick außerhalb des Installationsordners startet die Installation, die
+installierte Kopie startet das Tray-Symbol. `CatPrinter.exe install` bzw.
+`CatPrinter.exe uninstall` machen dasselbe ausdrücklich.
 
 ## Tests
 

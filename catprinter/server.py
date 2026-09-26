@@ -619,6 +619,12 @@ class Handler(BaseHTTPRequestHandler):
                 return
         elif name == "history-clear":
             svc.history.clear()
+        elif name == "quit":
+            # Für Installation/Update: laufende Instanz sauber beenden
+            log.info("Beenden angefordert")
+            self._json(202, {"ok": True})
+            threading.Thread(target=svc.emit, args=("quit",), daemon=True).start()
+            return
         else:
             self._send(404, "text/plain", b"unknown action")
             return

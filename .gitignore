@@ -1,6 +1,12 @@
 __pycache__/
 *.py[cod]
 
+# Build (build.ps1 / PyInstaller)
+build/
+dist/
+*.spec
+packaging/CatPrinter.ico
+
 # Local sample prints / test images
 images/
 

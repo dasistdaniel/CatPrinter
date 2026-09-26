@@ -1,9 +1,11 @@
 """Symbol im Infobereich: startet den Druckserver und zeigt Status, Akku und Menü."""
 import ctypes
+import json
 import logging
 import os
 import subprocess
 import threading
+import urllib.request
 import webbrowser
 
 import pystray
@@ -81,7 +83,9 @@ class TrayApp:
     # ------------------------------------------------------------ Ereignisse
 
     def on_event(self, event, **data):
-        if event == "job_started":
+        if event == "quit":
+            self._quit()
+        elif event == "job_started":
             self.set_state("printing", data["job"].name)
         elif event == "job_done":
             self.update_battery(data.get("status") or {})
@@ -166,12 +170,27 @@ class TrayApp:
         try:
             self.start_server()
         except OSError:
-            _message_box("Der Cat-Printer-Server läuft bereits (Port belegt).\n"
-                         "Das Symbol findest du im Infobereich der Taskleiste.")
+            cfg = load_config()
+            url = f"http://{cfg['http_host']}:{cfg['http_port']}/"
+            if _server_answers(url):
+                # Läuft schon (z. B. per Autostart): einfach die Statusseite öffnen
+                log.info("Server läuft bereits – öffne Statusseite")
+                webbrowser.open(url)
+                return 0
+            _message_box(f"Port {cfg['http_port']} ist von einem anderen Programm belegt.\n"
+                         "Der Cat-Printer-Server kann nicht starten.")
             return 1
         log.info("Tray gestartet")
         self.icon.run()
         return 0
+
+
+def _server_answers(url):
+    try:
+        with urllib.request.urlopen(url + "status.json", timeout=3) as resp:
+            return resp.status == 200 and "state" in json.loads(resp.read())
+    except (OSError, ValueError):
+        return False
 
 
 def _short(text, limit=120):

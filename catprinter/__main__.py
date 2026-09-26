@@ -2,6 +2,7 @@
 import argparse
 import logging
 import sys
+import threading
 
 from PIL import Image
 
@@ -12,8 +13,14 @@ from .server import CONFIG_DIR, CONFIG_FILE, load_config, serve
 
 def main():
     ap = argparse.ArgumentParser(prog="catprinter")
-    ap.add_argument("command", nargs="?", default="serve",
-                    choices=["serve", "tray", "status", "test", "image", "calibrate"])
+    # Die exe (ohne Konsole) startet per Doppelklick: installiert -> Tray, sonst Installation
+    frozen = getattr(sys, "frozen", False)
+    default = "serve"
+    if frozen:
+        from .installer import is_installed_copy
+        default = "tray" if is_installed_copy() else "install"
+    ap.add_argument("command", nargs="?", default=default,
+                    choices=["serve", "tray", "status", "test", "image", "calibrate", "install", "uninstall"])
     ap.add_argument("file", nargs="*", help="Bilddatei (image) bzw. Dichtewerte (calibrate)")
     ap.add_argument("--density", type=int, help="Druckdichte für test/image")
     ap.add_argument("--mode", choices=["auto", "text", "photo"], help="Bildmodus für test/image")
@@ -24,7 +31,7 @@ def main():
     ap.add_argument("--log-file", metavar="DATEI", help="Log in eine Datei schreiben (nötig mit pythonw)")
     args = ap.parse_args()
 
-    if args.command == "tray" and not args.log_file:
+    if args.command in ("tray", "install", "uninstall") and not args.log_file:
         # Tray läuft ohne Konsole (pythonw) – ohne Datei ginge das Log verloren
         import os
         os.makedirs(CONFIG_DIR, exist_ok=True)
@@ -37,6 +44,20 @@ def main():
     if args.port:
         cfg["com_port"] = args.port
 
+    if args.command in ("install", "uninstall"):
+        from . import installer
+        if not frozen:
+            print("install/uninstall gibt es nur in der exe (build.ps1). "
+                  "Für die Python-Variante: autostart.ps1 und Add-Printer, siehe README.")
+            return 1
+        try:
+            return installer.install() if args.command == "install" else installer.uninstall()
+        except Exception as e:  # noqa: BLE001 – dem Nutzer zeigen statt still abzubrechen
+            logging.exception("%s fehlgeschlagen", args.command)
+            installer._box(f"Fehler bei der {'Installation' if args.command == 'install' else 'Deinstallation'}:"
+                           f"\n{e}\n\nDetails im Log: {CONFIG_DIR}", installer.MB_ICONWARNING)
+            return 1
+
     if args.command == "tray":
         from .tray import TrayApp  # pystray nur laden, wenn gebraucht
         logging.info("Konfiguration: %s", CONFIG_FILE)
@@ -45,7 +66,9 @@ def main():
     if args.command == "serve":
         logging.info("Konfiguration: %s", CONFIG_FILE)
         try:
-            httpd, _service = serve(cfg, args.save_jobs)
+            httpd, service = serve(cfg, args.save_jobs)
+            service.listeners.append(
+                lambda event, **_d: event == "quit" and threading.Thread(target=httpd.shutdown).start())
         except OSError as e:
             logging.error("Port %d ist belegt – läuft der Server schon? (%s)", cfg["http_port"], e)
             return 1

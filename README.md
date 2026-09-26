@@ -45,10 +45,34 @@ work.
 ## Requirements
 
 - Windows 11 (Windows 10 might work, untested)
-- Python 3.10+ ([python.org](https://www.python.org/))
 - The printer paired in *Settings → Bluetooth & devices*
+- Only for running from source: Python 3.10+ ([python.org](https://www.python.org/))
 
-## Installation
+## Installation (Windows program)
+
+1. Get `CatPrinter.exe` – from the [Releases](https://github.com/dasistdaniel/CatPrinterDriver/releases)
+   page if available, or build it yourself (see *Building the exe*).
+2. Double-click it and confirm **Install**. It
+   - copies itself to `%LOCALAPPDATA%\Programs\CatPrinter` (no admin rights needed),
+   - starts automatically at logon (tray icon) and adds a Start menu entry,
+   - adds the printer **"Cat Printer"** to Windows if it doesn't exist yet –
+     this is the only step that asks for administrator rights,
+   - registers itself under *Settings → Apps* for uninstalling.
+3. Print from any program to "Cat Printer".
+
+To **update**, simply run a newer `CatPrinter.exe` – it replaces the installed
+copy; settings, history and the Windows printer are kept.
+To **uninstall**, use *Settings → Apps → Cat Printer (CatPrinterDriver)*. It
+removes the printer (admin prompt) and asks whether to delete settings,
+log and history.
+
+> [!WARNING]
+> The exe is **not code-signed**. When you download it, Windows SmartScreen
+> may show *"Windows protected your PC"* – click *More info → Run anyway*.
+> Some antivirus programs also flag PyInstaller-built executables by mistake.
+> If you prefer, build the exe yourself or run from source.
+
+## Running from source (Python)
 
 ```powershell
 git clone https://github.com/dasistdaniel/CatPrinterDriver.git
@@ -75,10 +99,11 @@ pip install -r requirements.txt
    .\autostart.ps1 -Remove    # removes it again
    ```
    The log file is then `%APPDATA%\CatPrinterDriver\server.log`.
+   (Don't combine this with the installed exe – both use the same autostart entry.)
 
 ## Tray icon
 
-`python -m catprinter tray` (used by the autostart) runs the print server
+The installed exe (or `python -m catprinter tray`) runs the print server
 together with a cat icon in the notification area. The dot shows the state:
 🟢 ready · 🔵 printing · 🔴 error.
 
@@ -178,7 +203,19 @@ tray menu afterwards.
 | Output too light | Charge the battery; raise `density` (see `calibrate`). |
 | Thin lighter lines in large all-black areas | Rows where all 384 dots are black get slightly less heat on battery power. Print such images with the USB cable plugged in (charging) – in our test the lines disappeared. Text and normal images are not affected. |
 | "Unknown USB device" when plugged in | Normal: the USB port only charges the printer, it has no data connection. Printing works only via Bluetooth. |
-| Remove everything | `Remove-Printer "Cat Printer"` (as admin), `.\autostart.ps1 -Remove`, delete `%APPDATA%\CatPrinterDriver`. |
+| Remove everything | exe: uninstall via *Settings → Apps*. Source version: `Remove-Printer "Cat Printer"` (as admin), `.\autostart.ps1 -Remove`, delete `%APPDATA%\CatPrinterDriver`. |
+
+## Building the exe
+
+```powershell
+pip install -r requirements.txt pyinstaller
+.\build.ps1
+```
+
+Runs the tests, generates the icon and builds `dist\CatPrinter.exe` (a single
+file, ~28 MB, no console window) with PyInstaller. Double-clicking it outside
+the install folder starts the installer; the installed copy starts the tray.
+`CatPrinter.exe install` / `CatPrinter.exe uninstall` do the same explicitly.
 
 ## Development
 
@@ -200,6 +237,8 @@ server with a fake printer.
 | `catprinter/pages.py` | Test and calibration pages |
 | `catprinter/statuspage.py` | Status page (HTML) and its JSON data |
 | `catprinter/history.py` | Optional history of printed jobs |
+| `catprinter/installer.py` | Install/update/uninstall of the exe |
+| `packaging/`, `build.ps1` | exe entry point, icon generator, build script |
 | `catprinter/__main__.py` | Command line interface |
 | `autostart.ps1` | Startup-folder shortcut |
 | `docs/PROTOCOL.md` | What was learned about the printer and the Windows IPP client |
