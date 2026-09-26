@@ -131,3 +131,7 @@ python -m unittest discover tests
 
 Laufen ohne Drucker (IPP-Codec, PWG-Raster, ESC/POS-Aufbau, kompletter
 IPP-Druckauftrag gegen den Server mit Attrappe).
+
+## Lizenz
+
+[MIT](LICENSE)

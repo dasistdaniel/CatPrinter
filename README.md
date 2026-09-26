@@ -156,3 +156,7 @@ The printer protocol was identified with the help of these projects:
 - [abhigkar/YHK-Cat-Thermal-Printer](https://github.com/abhigkar/YHK-Cat-Thermal-Printer) – YHK printers over Classic Bluetooth
 - [Dejniel/TiMini-Print](https://github.com/Dejniel/TiMini-Print) – density command `1D 49 F0 n`
 - [Josh McArthur – YHK Mini Printer notes](https://www.joshmcarthur.com/case-studies/yhk-mini-printer/)
+
+## License
+
+[MIT](LICENSE)
