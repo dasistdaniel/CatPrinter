@@ -1,0 +1,509 @@
+"""Virtueller IPP-Drucker: nimmt Druckaufträge von Windows entgegen und
+gibt sie auf dem Thermodrucker aus."""
+import io
+import itertools
+import json
+import logging
+import os
+import queue
+import threading
+import time
+import uuid
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+from PIL import Image
+
+from . import ipp, pwg
+from .printer import DEFAULT_DENSITY, DPI, Printer, PrinterError, prepare
+
+log = logging.getLogger("server")
+
+CONFIG_DIR = os.path.join(os.environ.get("APPDATA", os.path.expanduser("~")), "CatPrinterDriver")
+CONFIG_FILE = os.path.join(CONFIG_DIR, "config.json")
+
+DEFAULT_CONFIG = {
+    "http_host": "127.0.0.1",
+    "http_port": 631,
+    "com_port": None,          # None = automatisch über den Bluetooth-Namen suchen
+    "bluetooth_name": "YHK-",
+    "feed_mm": 15,
+    "density": DEFAULT_DENSITY,  # Druckdichte/Heizstärke (1D 49 F0 n)
+    "trim_bottom": True,
+    "rotate_180": True,        # Ausdruck aus Sicht des Drucker-Gesichts lesbar
+    "printer_name": "Cat Printer",
+}
+
+# Papiergrößen in 1/100 mm (Breite = bedruckbare 48 mm, ohne Ränder).
+# Größere Formate werden auf 48 mm Breite verkleinert.
+MEDIA = [
+    ("om_roll-40_48x40mm", 4800, 4000),
+    ("om_roll-80_48x80mm", 4800, 8000),
+    ("om_roll-150_48x150mm", 4800, 15000),
+    ("om_roll-300_48x300mm", 4800, 30000),
+    ("iso_a6_105x148mm", 10500, 14800),
+    ("iso_a4_210x297mm", 21000, 29700),
+    ("na_letter_8.5x11in", 21590, 27940),
+]
+DEFAULT_MEDIA = MEDIA[1]
+
+FORMATS = ["image/pwg-raster", "application/octet-stream"]
+
+# Job-Zustände
+PENDING, PROCESSING, CANCELED, ABORTED, COMPLETED = 3, 5, 7, 8, 9
+STATE_REASON = {PENDING: "none", PROCESSING: "job-printing", CANCELED: "job-canceled-by-user",
+                ABORTED: "aborted-by-system", COMPLETED: "job-completed-successfully"}
+
+
+def load_config():
+    cfg = dict(DEFAULT_CONFIG)
+    try:
+        with open(CONFIG_FILE, encoding="utf-8") as f:
+            cfg.update(json.load(f))
+    except FileNotFoundError:
+        pass
+    if not cfg.get("uuid"):
+        # Einmal erzeugen und behalten, sonst hält Windows den Drucker für ein neues Gerät
+        cfg["uuid"] = str(uuid.uuid4())
+        save_config(cfg)
+    return cfg
+
+
+def save_config(cfg):
+    os.makedirs(CONFIG_DIR, exist_ok=True)
+    with open(CONFIG_FILE, "w", encoding="utf-8") as f:
+        json.dump(cfg, f, indent=2)
+
+
+class Job:
+    def __init__(self, job_id, name, user, copies):
+        self.id = job_id
+        self.name = name
+        self.user = user
+        self.copies = copies
+        self.state = PENDING
+        self.message = ""
+        self.created = int(time.time())
+        self.processing = 0
+        self.completed = 0
+        self.pages = 0
+        self.data = None
+
+
+class PrintService:
+    def __init__(self, cfg, save_jobs_dir=None):
+        self.cfg = cfg
+        self.printer = Printer(cfg.get("com_port"), cfg.get("bluetooth_name", "YHK-"))
+        self.jobs = {}
+        self.ids = itertools.count(1)
+        self.lock = threading.Lock()
+        self.queue = queue.Queue()
+        self.start_time = int(time.time())
+        self.last_error = None
+        self.save_jobs_dir = save_jobs_dir
+        threading.Thread(target=self._worker, daemon=True).start()
+
+    def uptime(self):
+        return max(1, int(time.time()) - self.start_time)
+
+    def new_job(self, name, user, copies):
+        with self.lock:
+            job = Job(next(self.ids), name, user, copies)
+            self.jobs[job.id] = job
+            # Nur die letzten 50 Aufträge merken
+            for old in sorted(self.jobs)[:-50]:
+                del self.jobs[old]
+        return job
+
+    def submit(self, job, data):
+        job.data = data
+        self.queue.put(job)
+
+    def busy(self):
+        return any(j.state in (PENDING, PROCESSING) and j.data is not None for j in list(self.jobs.values()))
+
+    def _worker(self):
+        while True:
+            job = self.queue.get()
+            if job.state == CANCELED:
+                continue
+            job.state = PROCESSING
+            job.processing = self.uptime()
+            try:
+                self._print(job)
+                job.state = COMPLETED
+                self.last_error = None
+                log.info("Auftrag %d '%s' gedruckt (%d Seite(n))", job.id, job.name, job.pages)
+            except Exception as e:  # noqa: BLE001 – jeder Fehler bricht nur diesen Auftrag ab
+                job.state = ABORTED
+                job.message = str(e)
+                self.last_error = (time.time(), str(e))
+                log.error("Auftrag %d abgebrochen: %s", job.id, e,
+                          exc_info=not isinstance(e, PrinterError))
+            finally:
+                job.completed = self.uptime()
+                job.data = None
+
+    def _print(self, job):
+        data = job.data
+        if self.save_jobs_dir:
+            os.makedirs(self.save_jobs_dir, exist_ok=True)
+            with open(os.path.join(self.save_jobs_dir, f"job{job.id}.bin"), "wb") as f:
+                f.write(data)
+        if data[:4] == pwg.SYNC:
+            pages = []
+            for hdr, img in pwg.decode(data):
+                log.info("  %r", hdr)
+                pages.append(img)
+        else:
+            pages = [Image.open(io.BytesIO(data))]  # PNG/JPEG direkt
+        rotate = self.cfg.get("rotate_180", True)
+        images = [prepare(p, self.cfg.get("trim_bottom", True), rotate) for p in pages]
+        if rotate:
+            # Gedreht kommt das Seitenende zuerst – bei mehreren Seiten also
+            # mit der letzten beginnen, damit der Streifen von oben nach unten lesbar bleibt
+            images.reverse()
+        images = images * max(1, job.copies)
+        job.pages = len(images)
+        self.printer.print_images(images, self.cfg.get("feed_mm", 15),
+                                  self.cfg.get("density", DEFAULT_DENSITY))
+
+
+# ---------------------------------------------------------------- IPP-Attribute
+
+def _col(*attrs):
+    return list(attrs)
+
+
+def _media_col(name, x, y):
+    return _col(
+        ("media-size", ipp.BEGIN_COLLECTION, [_col(("x-dimension", ipp.INTEGER, [x]),
+                                                  ("y-dimension", ipp.INTEGER, [y]))]),
+        ("media-size-name", ipp.KEYWORD, [name]),
+        ("media-bottom-margin", ipp.INTEGER, [0]),
+        ("media-left-margin", ipp.INTEGER, [0]),
+        ("media-right-margin", ipp.INTEGER, [0]),
+        ("media-top-margin", ipp.INTEGER, [0]),
+        ("media-source", ipp.KEYWORD, ["main"]),
+        ("media-type", ipp.KEYWORD, ["stationery"]),
+    )
+
+
+def printer_attributes(service, host):
+    cfg = service.cfg
+    uri = f"ipp://{host}/ipp/print"
+    busy = service.busy()
+    reasons = ["none"]
+    message = "Bereit"
+    if service.last_error and time.time() - service.last_error[0] < 120:
+        reasons = ["offline-report"]
+        message = service.last_error[1][:200]
+    elif busy:
+        message = "Druckt"
+    name = cfg.get("printer_name", "Cat Printer")
+    I, K, B, T, N, E = ipp.INTEGER, ipp.KEYWORD, ipp.BOOLEAN, ipp.TEXT, ipp.NAME, ipp.ENUM
+    ops = [ipp.PRINT_JOB, ipp.VALIDATE_JOB, ipp.CREATE_JOB, ipp.SEND_DOCUMENT, ipp.CANCEL_JOB,
+           ipp.GET_JOB_ATTRIBUTES, ipp.GET_JOBS, ipp.GET_PRINTER_ATTRIBUTES, ipp.CLOSE_JOB]
+    return [
+        ("charset-configured", ipp.CHARSET, ["utf-8"]),
+        ("charset-supported", ipp.CHARSET, ["utf-8"]),
+        ("color-supported", B, [False]),
+        ("compression-supported", K, ["none"]),
+        ("copies-default", I, [1]),
+        ("copies-supported", ipp.RANGE, [(1, 99)]),
+        ("document-format-default", ipp.MIME, [FORMATS[0]]),
+        ("document-format-preferred", ipp.MIME, [FORMATS[0]]),
+        ("document-format-supported", ipp.MIME, FORMATS),
+        ("finishings-default", E, [3]),
+        ("finishings-supported", E, [3]),
+        ("generated-natural-language-supported", ipp.LANGUAGE, ["en"]),
+        ("ipp-versions-supported", K, ["1.1", "2.0"]),
+        ("job-creation-attributes-supported", K, ["copies", "media", "media-col", "orientation-requested",
+                                                  "print-color-mode", "print-quality", "print-scaling",
+                                                  "printer-resolution", "sides"]),
+        ("media-bottom-margin-supported", I, [0]),
+        ("media-left-margin-supported", I, [0]),
+        ("media-right-margin-supported", I, [0]),
+        ("media-top-margin-supported", I, [0]),
+        ("media-col-database", ipp.BEGIN_COLLECTION, [_media_col(*m) for m in MEDIA]),
+        ("media-col-default", ipp.BEGIN_COLLECTION, [_media_col(*DEFAULT_MEDIA)]),
+        ("media-col-ready", ipp.BEGIN_COLLECTION, [_media_col(*DEFAULT_MEDIA)]),
+        ("media-col-supported", K, ["media-bottom-margin", "media-left-margin", "media-right-margin",
+                                    "media-size", "media-size-name", "media-source", "media-top-margin",
+                                    "media-type"]),
+        ("media-default", K, [DEFAULT_MEDIA[0]]),
+        ("media-ready", K, [DEFAULT_MEDIA[0]]),
+        ("media-supported", K, [m[0] for m in MEDIA]),
+        ("media-size-supported", ipp.BEGIN_COLLECTION,
+         [_col(("x-dimension", I, [x]), ("y-dimension", I, [y])) for _n, x, y in MEDIA]),
+        ("media-source-default", K, ["main"]),
+        ("media-source-supported", K, ["main"]),
+        ("media-type-supported", K, ["stationery"]),
+        ("multiple-document-jobs-supported", B, [False]),
+        ("multiple-document-handling-default", K, ["separate-documents-uncollated-copies"]),
+        ("multiple-document-handling-supported", K, ["separate-documents-uncollated-copies"]),
+        ("multiple-operation-time-out", I, [60]),
+        ("natural-language-configured", ipp.LANGUAGE, ["en"]),
+        ("number-up-default", I, [1]),
+        ("number-up-supported", I, [1]),
+        ("operations-supported", E, ops),
+        ("orientation-requested-default", E, [3]),
+        ("orientation-requested-supported", E, [3, 4]),
+        ("output-bin-default", K, ["face-up"]),
+        ("output-bin-supported", K, ["face-up"]),
+        ("pdl-override-supported", K, ["attempted"]),
+        ("print-color-mode-default", K, ["monochrome"]),
+        ("print-color-mode-supported", K, ["monochrome"]),
+        ("print-quality-default", E, [4]),
+        ("print-quality-supported", E, [3, 4, 5]),
+        ("print-scaling-default", K, ["fit"]),
+        ("print-scaling-supported", K, ["auto", "fit", "fill", "none"]),
+        ("printer-device-id", T, ["MFG:YHK;MDL:Cat Printer;CMD:PWGRaster;CLS:PRINTER;"]),
+        ("printer-firmware-name", N, ["CatPrinterDriver"]),
+        ("printer-firmware-string-version", T, ["0.1"]),
+        ("printer-info", T, [name]),
+        ("printer-is-accepting-jobs", B, [True]),
+        ("printer-location", T, ["Bluetooth"]),
+        ("printer-make-and-model", T, ["YHK Cat Printer"]),
+        ("printer-more-info", ipp.URI, [f"http://{host}/"]),
+        ("printer-name", N, [name]),
+        ("printer-resolution-default", ipp.RESOLUTION, [(DPI, DPI, 3)]),
+        ("printer-resolution-supported", ipp.RESOLUTION, [(DPI, DPI, 3)]),
+        ("printer-state", E, [4 if busy else 3]),
+        ("printer-state-message", T, [message]),
+        ("printer-state-reasons", K, reasons),
+        ("printer-up-time", I, [service.uptime()]),
+        ("printer-uri-supported", ipp.URI, [uri]),
+        ("printer-uuid", ipp.URI, [f"urn:uuid:{cfg['uuid']}"]),
+        ("pwg-raster-document-resolution-supported", ipp.RESOLUTION, [(DPI, DPI, 3)]),
+        ("pwg-raster-document-sheet-back", K, ["normal"]),
+        ("pwg-raster-document-type-supported", K, ["sgray_8", "black_1"]),
+        ("queued-job-count", I, [sum(1 for j in list(service.jobs.values()) if j.state in (PENDING, PROCESSING))]),
+        ("sides-default", K, ["one-sided"]),
+        ("sides-supported", K, ["one-sided"]),
+        ("uri-authentication-supported", K, ["none"]),
+        ("uri-security-supported", K, ["none"]),
+        ("which-jobs-supported", K, ["completed", "not-completed"]),
+    ]
+
+
+def job_attributes(service, job, host):
+    reason = STATE_REASON[job.state]
+    if job.state == PENDING and job.data is None:
+        reason = "job-incoming"
+    attrs = [
+        ("job-id", ipp.INTEGER, [job.id]),
+        ("job-uri", ipp.URI, [f"ipp://{host}/ipp/print/{job.id}"]),
+        ("job-printer-uri", ipp.URI, [f"ipp://{host}/ipp/print"]),
+        ("job-name", ipp.NAME, [job.name]),
+        ("job-originating-user-name", ipp.NAME, [job.user]),
+        ("job-state", ipp.ENUM, [job.state]),
+        ("job-state-reasons", ipp.KEYWORD, [reason]),
+        ("job-printer-up-time", ipp.INTEGER, [service.uptime()]),
+        ("time-at-creation", ipp.INTEGER, [max(1, job.created - service.start_time)]),
+        ("job-impressions-completed", ipp.INTEGER, [job.pages if job.state == COMPLETED else 0]),
+    ]
+    attrs.append(("time-at-processing", ipp.INTEGER, [job.processing]) if job.processing
+                 else ("time-at-processing", ipp.NO_VALUE, [None]))
+    attrs.append(("time-at-completed", ipp.INTEGER, [job.completed]) if job.completed
+                 else ("time-at-completed", ipp.NO_VALUE, [None]))
+    if job.message:
+        attrs.append(("job-state-message", ipp.TEXT, [job.message[:200]]))
+    return attrs
+
+
+GROUP_KEYWORDS = {"all", "printer-description", "job-template", "job-description",
+                  "job-status", "printer-status", "media-col-database"}
+
+
+def _filter(attrs, requested):
+    if not requested or any(r in GROUP_KEYWORDS for r in requested):
+        return attrs
+    wanted = set(requested)
+    return [a for a in attrs if a[0] in wanted]
+
+
+# ---------------------------------------------------------------- HTTP
+
+class Handler(BaseHTTPRequestHandler):
+    protocol_version = "HTTP/1.1"
+    server_version = "CatPrinterDriver/0.1"
+    service: PrintService = None
+
+    def log_message(self, fmt, *args):
+        log.debug("HTTP %s", fmt % args)
+
+    def _read_body(self):
+        if "chunked" in self.headers.get("Transfer-Encoding", "").lower():
+            body = bytearray()
+            while True:
+                size_line = self.rfile.readline()
+                size = int(size_line.split(b";", 1)[0].strip() or b"0", 16)
+                if size == 0:
+                    while self.rfile.readline() not in (b"\r\n", b"\n", b""):
+                        pass
+                    return bytes(body)
+                body += self.rfile.read(size)
+                self.rfile.readline()  # CRLF nach dem Block
+        length = int(self.headers.get("Content-Length") or 0)
+        return self.rfile.read(length) if length else b""
+
+    def _send(self, status, ctype, body):
+        self.send_response(status)
+        self.send_header("Content-Type", ctype)
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def do_GET(self):
+        svc = self.service
+        rows = "".join(
+            f"<tr><td>{j.id}</td><td>{_html(j.name)}</td><td>{STATE_REASON[j.state]}</td>"
+            f"<td>{_html(j.message)}</td></tr>" for j in sorted(list(svc.jobs.values()), key=lambda j: -j.id))
+        err = _html(svc.last_error[1]) if svc.last_error else "–"
+        body = (f"<!doctype html><meta charset=utf-8><title>Cat Printer</title>"
+                f"<h1>{_html(svc.cfg['printer_name'])}</h1>"
+                f"<p>COM-Port: {_html(svc.printer.port or 'automatisch')}<br>Letzter Fehler: {err}</p>"
+                f"<table border=1 cellpadding=4><tr><th>#</th><th>Name</th><th>Status</th><th>Meldung</th></tr>"
+                f"{rows}</table>").encode("utf-8")
+        self._send(200, "text/html; charset=utf-8", body)
+
+    def do_POST(self):
+        body = self._read_body()
+        if self.headers.get("Content-Type", "").split(";")[0].strip() != "application/ipp":
+            self._send(400, "text/plain", b"expected application/ipp")
+            return
+        try:
+            req, doc = ipp.decode(body)
+        except (ValueError, IndexError) as e:
+            log.warning("Ungültige IPP-Anfrage: %s", e)
+            self._send(400, "text/plain", b"bad ipp")
+            return
+        host = self.headers.get("Host") or f"{self.server.server_address[0]}:{self.server.server_address[1]}"
+        op = ipp.OPERATION_NAMES.get(req.code, f"0x{req.code:04x}")
+        log.info("IPP %s (Anfrage %d, %d Bytes Dokument)", op, req.request_id, len(doc))
+        log.debug("Anfrage-Attribute:\n%s", ipp.describe(req))
+        try:
+            resp = self._dispatch(req, doc, host)
+        except Exception:  # noqa: BLE001
+            log.exception("Fehler bei %s", op)
+            resp = self._response(req, ipp.INTERNAL_ERROR)
+        log.debug("Antwort 0x%04x", resp.code)
+        self._send(200, "application/ipp", ipp.encode(resp))
+
+    # -------------------------------------------------------- IPP-Operationen
+
+    def _response(self, req, status, message=None):
+        op_attrs = [("attributes-charset", ipp.CHARSET, ["utf-8"]),
+                    ("attributes-natural-language", ipp.LANGUAGE, ["en"])]
+        if message:
+            op_attrs.append(("status-message", ipp.TEXT, [message]))
+        return ipp.Message(req.version if req.version[0] <= 2 else (2, 0), status, req.request_id,
+                           [(ipp.OPERATION, op_attrs)])
+
+    def _dispatch(self, req, doc, host):
+        svc = self.service
+        op = req.code
+        if op == ipp.GET_PRINTER_ATTRIBUTES:
+            resp = self._response(req, ipp.OK)
+            requested = req.get_all("requested-attributes", ipp.OPERATION)
+            resp.add_group(ipp.PRINTER, _filter(printer_attributes(svc, host), requested))
+            return resp
+
+        if op in (ipp.VALIDATE_JOB, ipp.CLOSE_JOB, ipp.IDENTIFY_PRINTER):
+            return self._response(req, ipp.OK)
+
+        if op in (ipp.PRINT_JOB, ipp.CREATE_JOB):
+            fmt = req.get("document-format", ipp.OPERATION)
+            if op == ipp.PRINT_JOB and not _format_ok(fmt, doc):
+                return self._response(req, ipp.DOCUMENT_FORMAT_NOT_SUPPORTED, f"Format {fmt} nicht unterstützt")
+            job = svc.new_job(req.get("job-name", ipp.OPERATION) or "Dokument",
+                              req.get("requesting-user-name", ipp.OPERATION) or "Windows",
+                              req.get("copies", ipp.JOB) or 1)
+            if op == ipp.PRINT_JOB:
+                svc.submit(job, doc)
+            resp = self._response(req, ipp.OK)
+            resp.add_group(ipp.JOB, _filter(job_attributes(svc, job, host),
+                                            ["job-id", "job-uri", "job-state", "job-state-reasons"]))
+            return resp
+
+        job = svc.jobs.get(_job_id(req))
+
+        if op == ipp.SEND_DOCUMENT:
+            if job is None:
+                return self._response(req, ipp.NOT_FOUND, "Auftrag nicht gefunden")
+            fmt = req.get("document-format", ipp.OPERATION)
+            if doc and not _format_ok(fmt, doc):
+                job.state, job.completed = ABORTED, svc.uptime()
+                return self._response(req, ipp.DOCUMENT_FORMAT_NOT_SUPPORTED, f"Format {fmt} nicht unterstützt")
+            if doc:
+                svc.submit(job, doc)
+            elif req.get("last-document", ipp.OPERATION):
+                job.state, job.completed = COMPLETED, svc.uptime()  # leerer Auftrag
+            resp = self._response(req, ipp.OK)
+            resp.add_group(ipp.JOB, _filter(job_attributes(svc, job, host),
+                                            ["job-id", "job-uri", "job-state", "job-state-reasons"]))
+            return resp
+
+        if op == ipp.GET_JOB_ATTRIBUTES:
+            if job is None:
+                return self._response(req, ipp.NOT_FOUND, "Auftrag nicht gefunden")
+            resp = self._response(req, ipp.OK)
+            resp.add_group(ipp.JOB, _filter(job_attributes(svc, job, host),
+                                            req.get_all("requested-attributes", ipp.OPERATION)))
+            return resp
+
+        if op == ipp.CANCEL_JOB:
+            if job is None:
+                return self._response(req, ipp.NOT_FOUND, "Auftrag nicht gefunden")
+            if job.state in (COMPLETED, ABORTED, CANCELED) or job.state == PROCESSING:
+                return self._response(req, ipp.NOT_POSSIBLE, "Auftrag kann nicht mehr abgebrochen werden")
+            job.state, job.completed = CANCELED, svc.uptime()
+            return self._response(req, ipp.OK)
+
+        if op == ipp.GET_JOBS:
+            which = req.get("which-jobs", ipp.OPERATION) or "not-completed"
+            done = (COMPLETED, ABORTED, CANCELED)
+            jobs = [j for j in sorted(list(svc.jobs.values()), key=lambda j: -j.id)
+                    if (j.state in done) == (which == "completed") or which == "all"]
+            limit = req.get("limit", ipp.OPERATION)
+            if limit:
+                jobs = jobs[:limit]
+            requested = req.get_all("requested-attributes", ipp.OPERATION) or ["job-id", "job-uri"]
+            resp = self._response(req, ipp.OK)
+            for j in jobs:
+                resp.add_group(ipp.JOB, _filter(job_attributes(svc, j, host), requested))
+            return resp
+
+        return self._response(req, ipp.OPERATION_NOT_SUPPORTED)
+
+
+def _job_id(req):
+    job_id = req.get("job-id", ipp.OPERATION)
+    if job_id is None:
+        uri = req.get("job-uri", ipp.OPERATION) or ""
+        tail = uri.rstrip("/").rsplit("/", 1)[-1]
+        job_id = int(tail) if tail.isdigit() else None
+    return job_id
+
+
+def _format_ok(fmt, doc):
+    if doc[:4] == pwg.SYNC:
+        return True
+    if fmt in (None, "application/octet-stream", "image/png", "image/jpeg"):
+        return doc[:8] == b"\x89PNG\r\n\x1a\n" or doc[:3] == b"\xff\xd8\xff"
+    return False
+
+
+def _html(text):
+    return (str(text).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;"))
+
+
+def serve(cfg, save_jobs_dir=None):
+    service = PrintService(cfg, save_jobs_dir)
+    handler = type("BoundHandler", (Handler,), {"service": service})
+    # Kein SO_REUSEADDR: unter Windows könnte sonst eine zweite Instanz denselben Port belegen
+    server_cls = type("SingleServer", (ThreadingHTTPServer,), {"allow_reuse_address": False})
+    httpd = server_cls((cfg["http_host"], cfg["http_port"]), handler)
+    httpd.daemon_threads = True
+    log.info("IPP-Drucker läuft: ipp://%s:%d/ipp/print", cfg["http_host"], cfg["http_port"])
+    return httpd, service
