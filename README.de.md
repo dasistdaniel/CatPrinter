@@ -117,14 +117,22 @@ Drucker aus) und wenn der Akku unter 6,8 V fällt.
 | `python -m catprinter test` | Testseite direkt drucken (ohne Windows) |
 | `python -m catprinter image bild.png` | Bild direkt drucken |
 | `python -m catprinter calibrate 15 25 40` | Schwarzfelder mit verschiedenen Druckdichten drucken |
-| http://127.0.0.1:631/ | Statusseite: Zustand, Akku, letzte Aufträge, Einstellungen, Knöpfe für Testseite und Akkuprüfung (aktualisiert sich live, hell/dunkel) |
+| http://127.0.0.1:631/ | Statusseite: Zustand, Akku, letzte Aufträge, änderbare Einstellungen, Knöpfe für Testseite und Akkuprüfung (aktualisiert sich live, hell/dunkel) |
 
 Optionen: `--port COMx`, `--density N`, `--mode auto|text|photo`, `--log-file DATEI`.
 
 ## Einstellungen
 
-`%APPDATA%\CatPrinterDriver\config.json` (wird beim ersten Start angelegt;
-nach Änderungen im Tray-Menü *Server neu starten* wählen):
+Am einfachsten über die **Statusseite** (http://127.0.0.1:631/ oder
+Doppelklick auf das Tray-Symbol): Dort lassen sich Druckdichte, Bildmodus,
+Drehung, Vorschub, Zuschnitt und Verbindung ändern. Änderungen gelten sofort
+ab dem nächsten Druck und werden gespeichert. *Probe drucken* druckt ein
+Testfeld mit der Dichte vom Schieberegler, damit du Werte vor dem Speichern
+ausprobieren kannst.
+
+Alle Einstellungen stehen in `%APPDATA%\CatPrinterDriver\config.json` (wird
+beim ersten Start angelegt; nach Änderungen von Hand im Tray-Menü *Server neu
+starten* wählen):
 
 | Schlüssel | Standard | Bedeutung |
 |---|---|---|

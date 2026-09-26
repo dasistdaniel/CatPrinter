@@ -14,7 +14,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from PIL import Image
 
 from . import ipp, pwg, statuspage
-from .pages import short_test_page
+from .pages import calibration_page, short_test_page
 from .printer import DEFAULT_DENSITY, DPI, MODES, Printer, PrinterError, prepare
 
 log = logging.getLogger("server")
@@ -56,6 +56,36 @@ STATE_REASON = {PENDING: "none", PROCESSING: "job-printing", CANCELED: "job-canc
                 ABORTED: "aborted-by-system", COMPLETED: "job-completed-successfully"}
 
 
+def validate_settings(changes):
+    """Prüft Änderungen von der Statusseite. Gibt bereinigte Werte zurück, sonst ValueError."""
+    clean = {}
+    for key, value in changes.items():
+        if key == "density":
+            if isinstance(value, bool) or not isinstance(value, int) or not 5 <= value <= 80:
+                raise ValueError("Druckdichte muss eine ganze Zahl von 5 bis 80 sein")
+        elif key == "feed_mm":
+            if isinstance(value, bool) or not isinstance(value, int) or not 0 <= value <= 50:
+                raise ValueError("Vorschub muss eine ganze Zahl von 0 bis 50 mm sein")
+        elif key == "image_mode":
+            if value not in MODES:
+                raise ValueError("Unbekannter Bildmodus")
+        elif key in ("rotate_180", "trim_bottom"):
+            if not isinstance(value, bool):
+                raise ValueError(f"{key} muss true oder false sein")
+        elif key == "com_port":
+            value = (value or "").strip().upper() or None
+            if value is not None and not (value.startswith("COM") and value[3:].isdigit()):
+                raise ValueError("COM-Port muss wie COM13 aussehen oder leer sein (automatisch)")
+        elif key == "bluetooth_name":
+            value = str(value).strip()
+            if not 1 <= len(value) <= 32:
+                raise ValueError("Bluetooth-Name darf nicht leer sein")
+        else:
+            raise ValueError(f"Einstellung {key} kann hier nicht geändert werden")
+        clean[key] = value
+    return clean
+
+
 def image_mode(quality, default="auto"):
     """Druckqualität aus dem Windows-Dialog -> Bildmodus."""
     if quality == 3:
@@ -79,10 +109,13 @@ def load_config():
     return cfg
 
 
-def save_config(cfg):
-    os.makedirs(CONFIG_DIR, exist_ok=True)
-    with open(CONFIG_FILE, "w", encoding="utf-8") as f:
+def save_config(cfg, path=None):
+    path = path or CONFIG_FILE
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    tmp = path + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
         json.dump(cfg, f, indent=2)
+    os.replace(tmp, path)  # nie eine halb geschriebene Datei hinterlassen
 
 
 class Job:
@@ -99,10 +132,12 @@ class Job:
         self.pages = 0
         self.data = None
         self.quality = None  # IPP print-quality: 3 = Entwurf, 4 = Normal, 5 = Hoch
+        self.density = None  # abweichende Druckdichte (Probedruck), sonst aus der Konfiguration
 
 
 class PrintService:
-    def __init__(self, cfg, save_jobs_dir=None):
+    def __init__(self, cfg, save_jobs_dir=None, config_file=None):
+        self.config_file = config_file or CONFIG_FILE
         self.cfg = cfg
         self.printer = Printer(cfg.get("com_port"), cfg.get("bluetooth_name", "YHK-"))
         self.jobs = {}
@@ -146,13 +181,27 @@ class PrintService:
             self.checking = True
             self.run_task(task)
 
-    def print_image(self, name, img):
+    def print_image(self, name, img, density=None):
         """Druckt ein PIL-Bild über die normale Auftragsverarbeitung (z. B. Testseite)."""
         buf = io.BytesIO()
         img.save(buf, "PNG")
         job = self.new_job(name, "CatPrinterDriver", 1)
+        job.density = density
         self.submit(job, buf.getvalue())
         return job
+
+    def update_settings(self, changes):
+        """Übernimmt geprüfte Einstellungen sofort und speichert sie in config.json."""
+        clean = validate_settings(changes)
+        self.cfg.update(clean)
+        if "com_port" in clean or "bluetooth_name" in clean:
+            # Leerer Port = beim nächsten Druck neu suchen
+            self.printer.port = self.cfg.get("com_port")
+            self.printer.name_prefix = self.cfg.get("bluetooth_name", "YHK-")
+        save_config(self.cfg, self.config_file)
+        log.info("Einstellungen geändert: %s", clean)
+        self.emit("settings", changes=clean)
+        return clean
 
     def stop(self):
         self._stopped = True
@@ -238,8 +287,8 @@ class PrintService:
             images.reverse()
         images = images * max(1, job.copies)
         job.pages = len(images)
-        self.printer.print_images(images, self.cfg.get("feed_mm", 15),
-                                  self.cfg.get("density", DEFAULT_DENSITY))
+        density = job.density or self.cfg.get("density", DEFAULT_DENSITY)
+        self.printer.print_images(images, self.cfg.get("feed_mm", 15), density)
 
 
 # ---------------------------------------------------------------- IPP-Attribute
@@ -438,28 +487,53 @@ class Handler(BaseHTTPRequestHandler):
         else:
             self._send(404, "text/plain", b"not found")
 
-    def _action(self, name):
+    def _json(self, status, data):
+        self._send(status, "application/json", json.dumps(data).encode("utf-8"))
+
+    def _action(self, name, body):
         # Eigener Header: fremde Webseiten können ihn nicht ohne CORS-Vorabfrage
-        # setzen, also keinen Druck über den Browser auslösen
+        # setzen, also weder drucken noch Einstellungen ändern
         if self.headers.get("X-CatPrinter") != "1":
             self._send(403, "text/plain", b"forbidden")
             return
         svc = self.service
+        try:
+            data = json.loads(body or b"{}")
+            if not isinstance(data, dict):
+                raise ValueError("JSON-Objekt erwartet")
+        except ValueError as e:
+            self._json(400, {"error": f"Ungültige Daten: {e}"})
+            return
         if name == "test":
             volts = statuspage.battery_volts(svc.status)
             info = f"Akku {volts:.2f} V".replace(".", ",") if volts else ""
             svc.print_image("Testseite", short_test_page(info))
         elif name == "battery":
             svc.refresh_status()
+        elif name == "calibrate":
+            try:
+                density = validate_settings({"density": data.get("density")})["density"]
+            except ValueError as e:
+                self._json(400, {"error": str(e)})
+                return
+            svc.print_image(f"Probedruck Dichte {density}", calibration_page(density), density)
+        elif name == "settings":
+            try:
+                applied = svc.update_settings(data)
+            except ValueError as e:
+                self._json(400, {"error": str(e)})
+                return
+            self._json(200, {"applied": applied})
+            return
         else:
             self._send(404, "text/plain", b"unknown action")
             return
-        self._send(202, "text/plain", b"ok")
+        self._json(202, {"ok": True})
 
     def do_POST(self):
         body = self._read_body()
         if self.path.startswith("/action/"):
-            self._action(self.path[len("/action/"):])
+            self._action(self.path[len("/action/"):], body)
             return
         if self.headers.get("Content-Type", "").split(";")[0].strip() != "application/ipp":
             self._send(400, "text/plain", b"expected application/ipp")
@@ -587,8 +661,8 @@ def _format_ok(fmt, doc):
     return False
 
 
-def serve(cfg, save_jobs_dir=None):
-    service = PrintService(cfg, save_jobs_dir)
+def serve(cfg, save_jobs_dir=None, config_file=None):
+    service = PrintService(cfg, save_jobs_dir, config_file)
     handler = type("BoundHandler", (Handler,), {"service": service})
     # Kein SO_REUSEADDR: unter Windows könnte sonst eine zweite Instanz denselben Port belegen
     server_cls = type("SingleServer", (ThreadingHTTPServer,), {"allow_reuse_address": False})

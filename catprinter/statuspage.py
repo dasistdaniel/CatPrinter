@@ -20,10 +20,15 @@ def status_dict(service):
         "volts": battery_volts(service.status),
         "firmware": service.status.get("SV"),
         "checking": service.checking,
-        "density": cfg.get("density"),
-        "image_mode": cfg.get("image_mode", "auto"),
-        "rotate": cfg.get("rotate_180", True),
-        "feed_mm": cfg.get("feed_mm"),
+        "settings": {
+            "density": cfg.get("density"),
+            "image_mode": cfg.get("image_mode", "auto"),
+            "rotate_180": cfg.get("rotate_180", True),
+            "trim_bottom": cfg.get("trim_bottom", True),
+            "feed_mm": cfg.get("feed_mm"),
+            "com_port": cfg.get("com_port") or "",
+            "bluetooth_name": cfg.get("bluetooth_name", "YHK-"),
+        },
         "url": f"ipp://{cfg['http_host']}:{cfg['http_port']}/ipp/print",
         "uptime": service.uptime(),
         "printed": service.printed,
@@ -115,12 +120,39 @@ h2 { font-size: 16px; margin: 0 0 12px; }
 .badge.failed { color: var(--err); background: var(--err-bg); }
 .badge.canceled { color: var(--muted); background: var(--neutral-bg); }
 .empty { color: var(--muted); padding: 24px 16px; text-align: center; }
-dl { display: grid; grid-template-columns: max-content 1fr; gap: 6px 16px; margin: 0; font-size: 14px; }
-dt { color: var(--muted); }
-dd { margin: 0; overflow-wrap: anywhere; }
+.settings { padding: 4px 16px; }
+.field { padding: 14px 0; border-top: 1px solid var(--line); }
+.field:first-child { border-top: 0; }
+.field > label, .twocol label { display: block; font-weight: 600; font-size: 14px; margin-bottom: 6px; }
+.control { display: flex; align-items: center; gap: 12px; }
+.help { color: var(--muted); font-size: 13px; margin: 6px 0 0; }
+input[type=range] { flex: 1; min-width: 0; accent-color: var(--accent); }
+output { font-weight: 600; font-variant-numeric: tabular-nums; min-width: 2ch; }
+input[type=number], input[type=text], select {
+  font: inherit; color: var(--text); background: var(--bg);
+  border: 1px solid var(--line); border-radius: 8px; padding: 7px 10px;
+}
+select { width: 100%; }
+input[type=number] { width: 90px; }
+input[type=text] { width: 100%; }
+input:focus-visible, select:focus-visible, button:focus-visible, summary:focus-visible {
+  outline: 2px solid var(--accent); outline-offset: 2px;
+}
+.unit { color: var(--muted); }
+.checks { display: grid; gap: 10px; }
+.check { display: flex; align-items: center; gap: 10px; font-size: 14px; cursor: pointer; }
+.check input { width: 18px; height: 18px; accent-color: var(--accent); margin: 0; }
+summary { font-weight: 600; font-size: 14px; cursor: pointer; }
+details[open] summary { margin-bottom: 10px; }
+.twocol { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+code { font-family: Consolas, ui-monospace, monospace; font-size: 12px; overflow-wrap: anywhere; }
+.save-row { display: flex; align-items: center; justify-content: flex-end; gap: 8px; padding: 14px 0; border-top: 1px solid var(--line); }
+.save-msg { margin-right: auto; font-size: 13px; color: var(--muted); }
+.save-msg.ok { color: var(--ok); }
+.save-msg.err { color: var(--err); }
 footer { color: var(--muted); font-size: 12px; margin-top: 24px; text-align: center; }
 @media (max-width: 600px) {
-  .grid { grid-template-columns: 1fr; }
+  .grid, .twocol { grid-template-columns: 1fr; }
   header { flex-wrap: wrap; }
   .pill { margin-left: 0; }
 }
@@ -173,24 +205,114 @@ footer { color: var(--muted); font-size: 12px; margin-top: 24px; text-align: cen
   <div class="card jobs" id="jobs"><div class="empty">Noch keine Aufträge</div></div>
 
   <h2 style="margin-top:24px">Einstellungen</h2>
-  <div class="card">
-    <dl>
-      <dt>Druckdichte</dt><dd id="density">–</dd>
-      <dt>Bildmodus</dt><dd id="mode">–</dd>
-      <dt>Ausrichtung</dt><dd id="rotate">–</dd>
-      <dt>Vorschub</dt><dd id="feed">–</dd>
-      <dt>Druckeradresse</dt><dd id="url">–</dd>
-    </dl>
-  </div>
+  <form class="card settings" id="settings" autocomplete="off">
+    <div class="field">
+      <label for="f-density">Druckdichte</label>
+      <div class="control">
+        <input type="range" id="f-density" name="density" min="5" max="80" step="1">
+        <output id="density-out">–</output>
+        <button type="button" id="btn-calibrate">Probe drucken</button>
+      </div>
+      <p class="help">Heizstärke. Höher = dunkler, aber feine Details laufen eher zu. Getestet: 40. WalkPrint nutzt 25.</p>
+    </div>
+    <div class="field">
+      <label for="f-mode">Bildmodus</label>
+      <select id="f-mode" name="image_mode">
+        <option value="auto">Automatisch – Text scharf, Fotos gerastert</option>
+        <option value="text">Text – harte Schwelle, alles gestochen scharf</option>
+        <option value="photo">Foto – alles gerastert</option>
+      </select>
+      <p class="help">Gilt für Druckqualität „Normal“. „Entwurf“ druckt immer als Text, „Hoch“ immer als Foto.</p>
+    </div>
+    <div class="field">
+      <label for="f-feed">Vorschub nach dem Druck</label>
+      <div class="control">
+        <input type="number" id="f-feed" name="feed_mm" min="0" max="50" step="1"><span class="unit">mm</span>
+      </div>
+      <p class="help">Damit das Ende über die Abreißkante kommt.</p>
+    </div>
+    <div class="field checks">
+      <label class="check"><input type="checkbox" id="f-rotate" name="rotate_180"> Um 180° drehen (vom Druckergesicht aus lesbar)</label>
+      <label class="check"><input type="checkbox" id="f-trim" name="trim_bottom"> Weißraum am Seitenende abschneiden</label>
+    </div>
+    <details class="field">
+      <summary>Verbindung</summary>
+      <div class="twocol">
+        <div>
+          <label for="f-port">COM-Port</label>
+          <input type="text" id="f-port" name="com_port" placeholder="automatisch">
+        </div>
+        <div>
+          <label for="f-btname">Bluetooth-Name beginnt mit</label>
+          <input type="text" id="f-btname" name="bluetooth_name">
+        </div>
+      </div>
+      <p class="help">COM-Port leer lassen, um den Drucker automatisch über seinen Bluetooth-Namen zu finden.
+        Druckeradresse für Windows: <code id="url">–</code></p>
+    </details>
+    <div class="save-row">
+      <span id="save-msg" class="save-msg" role="status"></span>
+      <button type="button" id="btn-reset">Verwerfen</button>
+      <button type="submit" class="primary" id="btn-save">Speichern</button>
+    </div>
+  </form>
 
-  <footer>CatPrinterDriver · aktualisiert sich automatisch · Einstellungen über das Tray-Symbol bearbeiten</footer>
+  <footer>CatPrinterDriver · aktualisiert sich automatisch · Änderungen gelten sofort und werden in config.json gespeichert</footer>
 </main>
 <script>
 const $ = (id) => document.getElementById(id);
 const STATE = { ready: "Bereit", printing: "Druckt …", error: "Fehler" };
 const JOB = { done: "Gedruckt", printing: "Druckt", pending: "Wartet", failed: "Fehlgeschlagen", canceled: "Abgebrochen" };
-const MODE = { auto: "Automatisch (Text scharf, Fotos gerastert)", text: "Text (harte Schwelle)", photo: "Foto (alles gerastert)" };
 const LOW_VOLTS = 6.8;
+let saved = null;   // Einstellungen laut Server
+let dirty = false;  // ungespeicherte Änderungen im Formular?
+
+function fillForm(s) {
+  $("f-density").value = s.density;
+  $("density-out").textContent = s.density;
+  $("f-mode").value = s.image_mode;
+  $("f-feed").value = s.feed_mm;
+  $("f-rotate").checked = s.rotate_180;
+  $("f-trim").checked = s.trim_bottom;
+  $("f-port").value = s.com_port;
+  $("f-btname").value = s.bluetooth_name;
+}
+function readForm() {
+  return {
+    density: Number($("f-density").value),
+    image_mode: $("f-mode").value,
+    feed_mm: Number($("f-feed").value),
+    rotate_180: $("f-rotate").checked,
+    trim_bottom: $("f-trim").checked,
+    com_port: $("f-port").value.trim(),
+    bluetooth_name: $("f-btname").value.trim(),
+  };
+}
+function changes() {
+  const form = readForm(), out = {};
+  for (const k in form) if (!saved || form[k] !== saved[k]) out[k] = form[k];
+  return out;
+}
+function setMsg(text, cls) {
+  const m = $("save-msg");
+  m.textContent = text;
+  m.className = "save-msg " + (cls || "");
+}
+function updateDirty() {
+  dirty = Object.keys(changes()).length > 0;
+  $("btn-save").disabled = $("btn-reset").disabled = !dirty;
+  if (dirty) setMsg("Nicht gespeicherte Änderungen");
+}
+async function post(name, data) {
+  const r = await fetch("action/" + name, {
+    method: "POST",
+    headers: { "X-CatPrinter": "1", "Content-Type": "application/json" },
+    body: JSON.stringify(data || {}),
+  });
+  const body = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(body.error || "Fehler " + r.status);
+  return body;
+}
 
 function fmtTime(epoch) {
   const d = new Date(epoch * 1000), now = new Date();
@@ -230,11 +352,9 @@ function render(s) {
   $("count").textContent = s.printed;
   $("uptime").textContent = "seit " + fmtUptime(s.uptime);
 
-  $("density").textContent = s.density;
-  $("mode").textContent = MODE[s.image_mode] || s.image_mode;
-  $("rotate").textContent = s.rotate ? "180° gedreht (vom Druckergesicht aus lesbar)" : "ungedreht";
-  $("feed").textContent = s.feed_mm + " mm";
   $("url").textContent = s.url;
+  saved = s.settings;
+  if (!dirty) fillForm(saved);
 
   const list = $("jobs");
   list.replaceChildren();
@@ -262,16 +382,44 @@ async function refresh() {
   }
 }
 
-async function action(name, button) {
+async function action(name, button, data) {
   button.disabled = true;
   try {
-    await fetch("action/" + name, { method: "POST", headers: { "X-CatPrinter": "1" } });
+    await post(name, data);
+  } catch (err) {
+    setMsg(err.message, "err");
   } finally {
     setTimeout(() => { button.disabled = false; refresh(); }, 600);
   }
 }
 $("btn-test").onclick = (e) => action("test", e.currentTarget);
 $("btn-battery").onclick = (e) => action("battery", e.currentTarget);
+$("btn-calibrate").onclick = (e) =>
+  action("calibrate", e.currentTarget, { density: Number($("f-density").value) });
+
+$("settings").addEventListener("input", (e) => {
+  if (e.target.id === "f-density") $("density-out").textContent = e.target.value;
+  updateDirty();
+});
+$("btn-reset").onclick = () => { fillForm(saved); updateDirty(); setMsg(""); };
+$("settings").onsubmit = async (e) => {
+  e.preventDefault();
+  const diff = changes();
+  if (!Object.keys(diff).length) return;
+  $("btn-save").disabled = true;
+  try {
+    await post("settings", diff);
+    dirty = false;
+    setMsg("Gespeichert – gilt ab dem nächsten Druck", "ok");
+    await refresh();
+    updateDirty();
+    setMsg("Gespeichert – gilt ab dem nächsten Druck", "ok");
+  } catch (err) {
+    setMsg(err.message, "err");
+    $("btn-save").disabled = false;
+  }
+};
+$("btn-save").disabled = $("btn-reset").disabled = true;
 
 refresh();
 setInterval(refresh, 3000);

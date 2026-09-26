@@ -1,7 +1,9 @@
 """Tests ohne Drucker: python -m unittest discover tests"""
 import http.client
 import json
+import os
 import random
+import tempfile
 import threading
 import time
 import unittest
@@ -190,7 +192,10 @@ class ServiceTest(unittest.TestCase):
 class ServerTest(unittest.TestCase):
     def setUp(self):
         cfg = dict(server.DEFAULT_CONFIG, http_port=0, uuid="00000000-0000-0000-0000-000000000001")
-        self.httpd, self.svc = server.serve(cfg)
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.config_file = os.path.join(tmp.name, "config.json")  # nie die echte config.json anfassen
+        self.httpd, self.svc = server.serve(cfg, config_file=self.config_file)
         self.svc.printer = FakePrinter()
         self.port = self.httpd.server_address[1]
         threading.Thread(target=self.httpd.serve_forever, daemon=True).start()
@@ -248,9 +253,9 @@ class ServerTest(unittest.TestCase):
         self.assertEqual(state, server.COMPLETED)
         self.assertEqual(self.svc.printer.printed[0][0].width, WIDTH)
 
-    def http(self, method, path, headers=None):
+    def http(self, method, path, headers=None, body=None):
         conn = http.client.HTTPConnection("127.0.0.1", self.port, timeout=10)
-        conn.request(method, path, headers=headers or {})
+        conn.request(method, path, body=body, headers=headers or {})
         resp = conn.getresponse()
         body = resp.read()
         conn.close()
@@ -274,6 +279,48 @@ class ServerTest(unittest.TestCase):
         self.assertEqual(len(self.svc.printer.printed), 1)
         data = json.loads(self.http("GET", "/status.json")[1])
         self.assertEqual((data["printed"], data["jobs"][0]["state"]), (1, "done"))
+
+    def post_json(self, action, data, header=True):
+        headers = {"Content-Type": "application/json"}
+        if header:
+            headers["X-CatPrinter"] = "1"
+        status, body = self.http("POST", "/action/" + action, headers, json.dumps(data))
+        return status, json.loads(body) if body.startswith(b"{") else body
+
+    def test_settings_saved_and_applied(self):
+        status, body = self.post_json("settings", {"density": 30, "image_mode": "text",
+                                                   "rotate_180": False, "com_port": "com7"})
+        self.assertEqual(status, 200, body)
+        self.assertEqual(body["applied"]["com_port"], "COM7")
+        self.assertEqual((self.svc.cfg["density"], self.svc.printer.port), (30, "COM7"))
+        with open(self.config_file, encoding="utf-8") as f:
+            self.assertEqual(json.load(f)["image_mode"], "text")
+        data = json.loads(self.http("GET", "/status.json")[1])
+        self.assertEqual(data["settings"]["density"], 30)
+        # Leerer Port = wieder automatisch suchen
+        self.post_json("settings", {"com_port": ""})
+        self.assertIsNone(self.svc.printer.port)
+
+    def test_settings_rejected(self):
+        for bad in ({"density": 500}, {"density": "40"}, {"image_mode": "x"}, {"http_port": 80},
+                    {"com_port": "LPT1"}, {"rotate_180": "ja"}):
+            status, body = self.post_json("settings", bad)
+            self.assertEqual(status, 400, bad)
+            self.assertIn("error", body)
+        self.assertEqual(self.svc.cfg["density"], server.DEFAULT_CONFIG["density"])
+        self.assertFalse(os.path.exists(self.config_file))
+        self.assertEqual(self.post_json("settings", {"density": 30}, header=False)[0], 403)
+
+    def test_calibrate_uses_own_density(self):
+        printed = []
+        self.svc.printer.print_images = lambda images, feed, density: printed.append(density)
+        self.assertEqual(self.post_json("calibrate", {"density": 55})[0], 202)
+        for _ in range(100):
+            if printed:
+                break
+            time.sleep(0.02)
+        self.assertEqual(printed, [55])
+        self.assertEqual(self.svc.cfg["density"], server.DEFAULT_CONFIG["density"])
 
     def test_unknown_operation(self):
         self.assertEqual(self.call(0x0033, []).code, ipp.OPERATION_NOT_SUPPORTED)

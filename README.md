@@ -122,15 +122,22 @@ the battery drops below 6.8 V.
 | `python -m catprinter test` | Print a test page directly (bypasses Windows) |
 | `python -m catprinter image picture.png` | Print an image file directly |
 | `python -m catprinter calibrate 15 25 40` | Print black test blocks at several density levels |
-| http://127.0.0.1:631/ | Status page: state, battery, recent jobs, settings, buttons for test page and battery check (updates live, light/dark mode) |
+| http://127.0.0.1:631/ | Status page: state, battery, recent jobs, editable settings, buttons for test page and battery check (updates live, light/dark mode) |
 
 Options: `--port COMx` (skip auto-detection), `--density N`, `--mode auto|text|photo`,
 `--log-file FILE`.
 
 ## Configuration
 
-`%APPDATA%\CatPrinterDriver\config.json` is created on first start.
-After changing it, choose *Restart server* in the tray menu.
+The easiest way: open the **status page** (http://127.0.0.1:631/, or
+double-click the tray icon). Density, image mode, rotation, feed, trimming
+and the connection can be changed there; changes apply to the next print
+immediately and are saved. *Print sample* prints a test block with the
+density on the slider, so you can try values before saving.
+
+All settings live in `%APPDATA%\CatPrinterDriver\config.json` (created on
+first start). If you edit the file by hand, choose *Restart server* in the
+tray menu afterwards.
 
 | Key | Default | Meaning |
 |---|---|---|
