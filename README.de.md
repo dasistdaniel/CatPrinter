@@ -22,7 +22,7 @@ seinem eingebauten *Microsoft IPP Class Driver* – wie mit einem Netzwerkdrucke
 
 ```
 Programm → Windows-Druckdialog → Microsoft IPP Class Driver (PWG-Raster, 203 dpi)
-  → catprinter-IPP-Server (127.0.0.1:631) → 384 Punkte, Dithering, Zuschnitt, Drehung
+  → catprinter-IPP-Server (127.0.0.1:631) → 384 Punkte, Text-/Foto-Rasterung, Zuschnitt, Drehung
   → ESC/POS → Bluetooth-COM-Port → Drucker
 ```
 
@@ -77,6 +77,17 @@ pip install -r requirements.txt
   A4/A6/Letter gehen auch, werden aber auf 48 mm Breite verkleinert (sehr klein).
 - **Ränder** auf 0 bzw. minimal stellen – Standardränder (z. B. 2,5 cm in Word)
   passen nicht auf 48 mm.
+- Die **Druckqualität** (im Druckdialog bzw. in den Druckeinstellungen)
+  bestimmt, wie Grautöne in schwarze Punkte umgewandelt werden:
+
+  | Qualität | Modus | Ergebnis |
+  |---|---|---|
+  | Entwurf | `text` | Harte Schwelle – alles gestochen scharf, Grauflächen werden schwarz oder weiß |
+  | **Normal** (Standard) | `auto` | Fotos werden gerastert; bei Text und Grafik bleiben Kanten scharf (keine ausgefransten geglätteten Schriften), nur gleichmäßige Grauflächen (Füllungen, Verläufe) werden gerastert |
+  | Hoch | `photo` | Alles gerastert (Floyd-Steinberg) |
+
+  *Automatisch* hält eine Seite für ein Foto, wenn sie viele verschiedene
+  Grautöne enthält. Klassische Windows-Programme (GDI) schicken immer „Normal“.
 - Weißraum am Seitenende wird automatisch abgeschnitten.
 - Standardmäßig wird um 180° gedreht, damit der Ausdruck vom „Gesicht“ des
   Druckers aus richtig herum steht (das Seitenende kommt zuerst heraus).
@@ -93,7 +104,7 @@ pip install -r requirements.txt
 | `python -m catprinter calibrate 15 25 40` | Schwarzfelder mit verschiedenen Druckdichten drucken |
 | http://127.0.0.1:631/ | Statusseite mit den letzten Aufträgen |
 
-Optionen: `--port COMx`, `--density N`, `--log-file DATEI`.
+Optionen: `--port COMx`, `--density N`, `--mode auto|text|photo`, `--log-file DATEI`.
 
 ## Einstellungen
 
@@ -108,6 +119,7 @@ nach Änderungen Server neu starten, z. B. ab- und wieder anmelden):
 | `feed_mm` | `15` | Papiervorschub nach dem Druck (bis über die Abreißkante) |
 | `trim_bottom` | `true` | Weißraum am Seitenende abschneiden |
 | `rotate_180` | `true` | Ausdruck um 180° drehen |
+| `image_mode` | `"auto"` | Modus bei Druckqualität „Normal“: `auto`, `text` oder `photo` |
 | `http_host` / `http_port` | `127.0.0.1` / `631` | Adresse des IPP-Servers |
 | `printer_name` | `"Cat Printer"` | Name gegenüber Windows |
 | `uuid` | zufällig | Identität des Druckers – nicht ändern, sonst hält Windows ihn für ein neues Gerät |

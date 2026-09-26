@@ -5,7 +5,7 @@ import subprocess
 import time
 
 import serial
-from PIL import Image, ImageOps
+from PIL import Image, ImageChops, ImageFilter, ImageOps
 from serial.tools import list_ports
 
 log = logging.getLogger("printer")
@@ -39,34 +39,56 @@ def find_port(name_prefix="YHK-"):
     return None
 
 
-def prepare(img, trim=True, rotate=False):
-    """Skaliert ein Seitenbild auf 384 Punkte Breite und rastert es auf 1 Bit.
+MODES = ("auto", "text", "photo")
+THRESHOLD = 128        # Schwelle schwarz/weiß im Textmodus
+PHOTO_GRAY_LEVELS = 64 # ab so vielen häufigen Grautönen gilt eine Seite als Foto
+FLAT_RANGE = 48        # max. Helligkeitsspanne im 3x3-Umfeld für "gleichmäßige Graufläche"
 
+
+def prepare(img, trim=True, rotate=False, mode="auto"):
+    """Skaliert ein Seitenbild auf 384 Punkte Breite und wandelt es in 1 Bit um.
+
+    mode: "photo" rastert alles (Floyd-Steinberg), "text" nutzt eine harte
+    Schwelle, "auto" entscheidet pro Seite (siehe _to_bw).
     rotate=True dreht um 180°, damit der Ausdruck richtig herum steht, wenn
     man von der Gesichtsseite des Druckers auf das herauskommende Papier schaut.
     """
-    bw = _prepare(img, trim)
+    gray = img.convert("L")
+    if abs(gray.width - WIDTH) <= 8:
+        gray = _fit_width(gray)
+    else:
+        h = max(1, round(gray.height * WIDTH / gray.width))
+        gray = gray.resize((WIDTH, h), Image.Resampling.LANCZOS)
+    bw = _to_bw(gray, mode)
+    if trim:
+        bw = _trim_bottom(bw)
     # Erst beschneiden, dann drehen: der weggeschnittene Weißraum am Seitenende
     # würde sonst nach dem Drehen vorn ausgedruckt
     return bw.rotate(180) if rotate else bw
 
 
-def _prepare(img, trim):
-    if img.mode == "1" and abs(img.width - WIDTH) <= 8:
-        img = img.convert("L")
-        img = _fit_width(img)
-        bw = img.point(lambda v: 0 if v < 128 else 255).convert("1", dither=Image.Dither.NONE)
-    else:
-        img = img.convert("L")
-        if abs(img.width - WIDTH) <= 8:
-            img = _fit_width(img)
-        else:
-            h = max(1, round(img.height * WIDTH / img.width))
-            img = img.resize((WIDTH, h), Image.Resampling.LANCZOS)
-        bw = img.convert("1")  # Floyd-Steinberg
-    if trim:
-        bw = _trim_bottom(bw)
-    return bw
+def _to_bw(gray, mode):
+    threshold = gray.point(lambda v: 0 if v < THRESHOLD else 255)
+    if mode == "text":
+        return threshold.convert("1", dither=Image.Dither.NONE)
+    dithered = gray.convert("1")  # Floyd-Steinberg
+    if mode == "photo" or _is_photo(gray):
+        return dithered
+    # Text/Grafik: Kanten (auch geglättete Schriftkanten) hart schwellen, damit sie
+    # nicht ausfransen; nur gleichmäßige Grauflächen (Füllungen, Verläufe) rastern.
+    spread = ImageChops.subtract(gray.filter(ImageFilter.MaxFilter(3)),
+                                 gray.filter(ImageFilter.MinFilter(3)))
+    flat = spread.point(lambda r: 255 if r < FLAT_RANGE else 0)
+    midtone = gray.point(lambda v: 255 if 8 <= v < 248 else 0)
+    mask = ImageChops.multiply(flat, midtone)
+    return Image.composite(dithered.convert("L"), threshold, mask).convert("1", dither=Image.Dither.NONE)
+
+
+def _is_photo(gray):
+    """Fotos nutzen viele verschiedene Grautöne, Text und Grafik nur wenige."""
+    hist = gray.histogram()
+    minimum = gray.width * gray.height * 0.001
+    return sum(1 for count in hist[32:224] if count > minimum) >= PHOTO_GRAY_LEVELS
 
 
 def _fit_width(img):

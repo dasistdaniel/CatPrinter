@@ -93,6 +93,16 @@ versions may behave differently.
   `multiple-document-handling-*`, `media-source-default`, `printer-firmware-*`,
   `printer-uuid`, `mopria-certified` (not answered – not needed).
 - **Keep `printer-uuid` stable** across restarts; it is stored in `config.json`.
+- **Print quality:** with `print-quality-supported = 3,4,5` Windows offers
+  *Draft / Normal / High* (`OutputQuality` in the print ticket) and sends the
+  choice as `print-quality` in the job attributes of `Create-Job`. Classic
+  GDI apps (`System.Drawing.Printing`) always send 4 – their
+  `PrinterResolution` setting is not mapped. The driver maps 3 → `text`,
+  4 → `auto`, 5 → `photo` (see below).
+- Text from GDI apps already arrives without anti-aliasing (pure black/white);
+  apps that render themselves (browsers, PDF viewers, graphics programs) send
+  anti-aliased edges, which plain Floyd–Steinberg dithering turns into frayed
+  text.
 - An aborted job ends up as *"Error, Complete"* in the Windows queue and does
   not block later jobs.
 
@@ -103,7 +113,24 @@ versions may behave differently.
 | `om_roll-40_48x40mm` … `om_roll-300_48x300mm` | 48 × 40/80/150/300 mm | Default: 48 × 80 mm, zero margins |
 | `iso_a6_105x148mm`, `iso_a4_210x297mm`, `na_letter_8.5x11in` | | Scaled down to 48 mm width |
 
-## 4. PWG raster decoding
+## 4. Converting gray to dots
+
+`printer.prepare()` scales each page to 384 dots width and converts it to
+1 bit, depending on the mode:
+
+- `photo` – Floyd–Steinberg dithering of the whole page.
+- `text` – hard threshold at 128.
+- `auto` – a page counts as a **photo** if at least 64 gray levels (range
+  32–223) each cover more than 0.1 % of the page; it is then dithered.
+  Otherwise it is treated as **text/graphics**: pixels in a *flat* mid-tone
+  area (brightness 8–247 and max−min of the 3×3 neighbourhood < 48) are taken
+  from the dithered image, everything else (edges, anti-aliased glyph
+  borders, black, white) from the thresholded image.
+
+Measured on real jobs: a photo had ~190 frequent gray levels, a logo 11 and
+a text page 4.
+
+## 5. PWG raster decoding
 
 Per page: 1796-byte header (big-endian; width @372, height @376,
 bits-per-pixel @388, bytes-per-line @392, color space @400), then per line

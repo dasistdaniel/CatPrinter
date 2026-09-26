@@ -54,6 +54,7 @@ def main():
                     choices=["serve", "status", "test", "image", "calibrate"])
     ap.add_argument("file", nargs="*", help="Bilddatei (image) bzw. Dichtewerte (calibrate)")
     ap.add_argument("--density", type=int, help="Druckdichte für test/image")
+    ap.add_argument("--mode", choices=["auto", "text", "photo"], help="Bildmodus für test/image")
     ap.add_argument("--chunk-delay", type=float, metavar="MS", help="Pause je 256 Bytes in ms (Test)")
     ap.add_argument("--port", help="COM-Port (Standard: automatisch)")
     ap.add_argument("--verbose", "-v", action="store_true")
@@ -88,15 +89,16 @@ def main():
     density = args.density if args.density is not None else cfg.get("density", DEFAULT_DENSITY)
     feed = cfg.get("feed_mm", 15)
     rotate = cfg.get("rotate_180", True)
+    mode = args.mode or cfg.get("image_mode", "auto")
     try:
         if args.command == "status":
             print(printer.status(), "auf", printer.port)
         elif args.command == "test":
-            printer.print_images([prepare(test_page(), rotate=rotate)], feed, density)
+            printer.print_images([prepare(test_page(), rotate=rotate, mode=mode)], feed, density)
         elif args.command == "image":
             if len(args.file) != 1:
                 ap.error("genau eine Bilddatei angeben")
-            printer.print_images([prepare(Image.open(args.file[0]), rotate=rotate)], feed, density)
+            printer.print_images([prepare(Image.open(args.file[0]), rotate=rotate, mode=mode)], feed, density)
         elif args.command == "calibrate":
             values = [int(v) for v in args.file] or [15, 25, 40]
             # Alle Stufen über eine Verbindung; jede mit eigenem Dichtebefehl,

@@ -75,6 +75,36 @@ class PrinterJobTest(unittest.TestCase):
         self.assertEqual(rows, bw.height + round(15 * 203 / 25.4))
         self.assertEqual(len(job), 14 + rows * 48)
 
+    def test_modes(self):
+        # Gleichmäßige Graufläche mit schwarzem Balken darüber
+        img = Image.new("L", (WIDTH, 200), 255)
+        img.paste(0, (0, 0, WIDTH, 40))
+        img.paste(100, (0, 80, WIDTH, 160))
+        gray_area = (20, 100, WIDTH - 20, 140)
+
+        def black_share(bw, box):
+            region = bw.convert("L").crop(box)
+            return region.histogram()[0] / (region.width * region.height)
+
+        text = prepare(img, trim=False, mode="text")
+        self.assertEqual(black_share(text, gray_area), 1.0)  # Schwelle: Grau 100 -> schwarz
+        for mode in ("auto", "photo"):
+            share = black_share(prepare(img, trim=False, mode=mode), gray_area)
+            self.assertTrue(0.4 < share < 0.8, (mode, share))  # gerastert
+        self.assertEqual(black_share(prepare(img, trim=False, mode="auto"), (0, 0, WIDTH, 40)), 1.0)
+
+    def test_photo_detection(self):
+        from catprinter.printer import _is_photo
+        self.assertFalse(_is_photo(Image.new("L", (WIDTH, 100), 255)))
+        gradient = Image.linear_gradient("L").resize((WIDTH, 300))
+        self.assertTrue(_is_photo(gradient))
+
+    def test_quality_mapping(self):
+        self.assertEqual(server.image_mode(3), "text")
+        self.assertEqual(server.image_mode(4), "auto")
+        self.assertEqual(server.image_mode(None, "photo"), "photo")
+        self.assertEqual(server.image_mode(5, "text"), "photo")
+
     def test_rotate_after_trim(self):
         img = Image.new("L", (WIDTH, 1000), 255)
         img.paste(0, (0, 0, WIDTH, 100))  # schwarzer Block oben, viel Weiß darunter

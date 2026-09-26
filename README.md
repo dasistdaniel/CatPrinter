@@ -24,7 +24,7 @@ Any application
   → Windows print dialog
   → Microsoft IPP Class Driver   (renders each page to PWG raster, 203 dpi, grayscale)
   → catprinter IPP server        (http://127.0.0.1:631/ipp/print)
-      scales to 384 dots · Floyd–Steinberg dithering · trims blank space · rotates
+      scales to 384 dots · text/photo-aware dithering · trims blank space · rotates
   → ESC/POS raster commands
   → Bluetooth serial port (SPP, e.g. COM13)
   → printer
@@ -83,6 +83,17 @@ pip install -r requirements.txt
   A4, A6 and Letter are accepted too, but are scaled down to 48 mm width (tiny).
 - **Margins:** set them to 0 / minimum. Default margins (e.g. 2.5 cm in Word)
   don't fit on 48 mm paper.
+- **Print quality** (in the print dialog / printer preferences) selects how
+  gray tones are converted to black-and-white dots:
+
+  | Quality | Mode | Result |
+  |---|---|---|
+  | Draft | `text` | Hard threshold – everything crisp, gray areas become solid black or white |
+  | **Normal** (default) | `auto` | Photos are dithered; for text and graphics, edges stay crisp (no frayed anti-aliased text) and only flat gray areas (fills, gradients) are dithered |
+  | High | `photo` | Everything dithered (Floyd–Steinberg) |
+
+  *Auto* treats a page as a photo when it uses many different gray levels.
+  Classic Windows (GDI) programs always send "Normal".
 - Blank space at the end of a page is cut off automatically to save paper.
 - By default the output is rotated by 180° so it reads correctly when you look
   at the printer from its "face" side (the end of the page comes out first).
@@ -99,7 +110,8 @@ pip install -r requirements.txt
 | `python -m catprinter calibrate 15 25 40` | Print black test blocks at several density levels |
 | http://127.0.0.1:631/ | Status page with the latest jobs |
 
-Options: `--port COMx` (skip auto-detection), `--density N`, `--log-file FILE`.
+Options: `--port COMx` (skip auto-detection), `--density N`, `--mode auto|text|photo`,
+`--log-file FILE`.
 
 ## Configuration
 
@@ -114,6 +126,7 @@ Restart the server after changing it.
 | `feed_mm` | `15` | Paper feed after printing, so the end clears the tear-off edge |
 | `trim_bottom` | `true` | Cut blank space at the end of each page |
 | `rotate_180` | `true` | Rotate output 180° (readable from the printer's face side) |
+| `image_mode` | `"auto"` | Mode used for print quality "Normal": `auto`, `text` or `photo` |
 | `http_host` / `http_port` | `127.0.0.1` / `631` | Address of the IPP server |
 | `printer_name` | `"Cat Printer"` | Name reported to Windows |
 | `uuid` | random | Printer identity – don't change it, or Windows sees a new device |

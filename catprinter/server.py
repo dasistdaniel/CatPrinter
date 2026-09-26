@@ -14,7 +14,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from PIL import Image
 
 from . import ipp, pwg
-from .printer import DEFAULT_DENSITY, DPI, Printer, PrinterError, prepare
+from .printer import DEFAULT_DENSITY, DPI, MODES, Printer, PrinterError, prepare
 
 log = logging.getLogger("server")
 
@@ -30,6 +30,7 @@ DEFAULT_CONFIG = {
     "density": DEFAULT_DENSITY,  # Druckdichte/Heizstärke (1D 49 F0 n)
     "trim_bottom": True,
     "rotate_180": True,        # Ausdruck aus Sicht des Drucker-Gesichts lesbar
+    "image_mode": "auto",      # Modus bei Druckqualität "Normal": auto, text oder photo
     "printer_name": "Cat Printer",
 }
 
@@ -52,6 +53,15 @@ FORMATS = ["image/pwg-raster", "application/octet-stream"]
 PENDING, PROCESSING, CANCELED, ABORTED, COMPLETED = 3, 5, 7, 8, 9
 STATE_REASON = {PENDING: "none", PROCESSING: "job-printing", CANCELED: "job-canceled-by-user",
                 ABORTED: "aborted-by-system", COMPLETED: "job-completed-successfully"}
+
+
+def image_mode(quality, default="auto"):
+    """Druckqualität aus dem Windows-Dialog -> Bildmodus."""
+    if quality == 3:
+        return "text"   # Entwurf: harte Schwelle
+    if quality == 5:
+        return "photo"  # Hoch: alles rastern
+    return default if default in MODES else "auto"
 
 
 def load_config():
@@ -87,6 +97,7 @@ class Job:
         self.completed = 0
         self.pages = 0
         self.data = None
+        self.quality = None  # IPP print-quality: 3 = Entwurf, 4 = Normal, 5 = Hoch
 
 
 class PrintService:
@@ -157,7 +168,9 @@ class PrintService:
         else:
             pages = [Image.open(io.BytesIO(data))]  # PNG/JPEG direkt
         rotate = self.cfg.get("rotate_180", True)
-        images = [prepare(p, self.cfg.get("trim_bottom", True), rotate) for p in pages]
+        mode = image_mode(job.quality, self.cfg.get("image_mode", "auto"))
+        log.info("  Bildmodus: %s (Druckqualität %s)", mode, job.quality)
+        images = [prepare(p, self.cfg.get("trim_bottom", True), rotate, mode) for p in pages]
         if rotate:
             # Gedreht kommt das Seitenende zuerst – bei mehreren Seiten also
             # mit der letzten beginnen, damit der Streifen von oben nach unten lesbar bleibt
@@ -419,6 +432,7 @@ class Handler(BaseHTTPRequestHandler):
             job = svc.new_job(req.get("job-name", ipp.OPERATION) or "Dokument",
                               req.get("requesting-user-name", ipp.OPERATION) or "Windows",
                               req.get("copies", ipp.JOB) or 1)
+            job.quality = req.get("print-quality", ipp.JOB)
             if op == ipp.PRINT_JOB:
                 svc.submit(job, doc)
             resp = self._response(req, ipp.OK)
