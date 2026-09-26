@@ -109,11 +109,10 @@ def main():
             printer.print_images([prepare(Image.open(args.file[0]), rotate=rotate, mode=mode)], feed, density)
         elif args.command == "calibrate":
             values = [int(v) for v in args.file] or [15, 25, 40]
-            # Alle Stufen über eine Verbindung; jede mit eigenem Dichtebefehl,
-            # aber nur ein ESC @ am Anfang (sonst wird der Puffer verworfen)
+            # Alle Stufen über eine Verbindung, jede mit eigenem Dichtebefehl (ohne ESC @)
             job = b"".join(
                 build_job([prepare(calibration_page(v), trim=False, rotate=rotate)],
-                          feed if i == len(values) - 1 else 2, v, init=(i == 0))
+                          feed if i == len(values) - 1 else 2, v)
                 for i, v in enumerate(values))
             printer.send(job)
     except PrinterError as e:

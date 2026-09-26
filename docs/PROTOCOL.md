@@ -32,7 +32,7 @@ versions may behave differently.
 
 | Bytes | Meaning | Notes |
 |---|---|---|
-| `1B 40` | `ESC @` initialize | **Discards everything still in the print buffer.** Only send it once at the start of a connection – concatenating jobs that each start with `ESC @` silently drops all but the last one. |
+| `1B 40` | `ESC @` initialize | **Discards everything still in the print buffer.** Concatenated jobs that each start with `ESC @` drop all but the last one, and a new job that starts with `ESC @` while the previous one is still printing cuts off the rest of it (seen when several photos were queued: the end of each one was missing). The driver therefore never sends it. |
 | `1D 49 F0 n` | Print density / heat | Sent by WalkPrint with `n = 0x19` (25). Visible difference between 15 and 60; 40 looked best. |
 | `1D 76 30 00 xL xH yL yH d…` | `GS v 0` raster image | `x` = bytes per row (48 for 384 dots), `y` = rows (16 bit). 1 bit per dot, MSB = leftmost, **1 = black**. |
 | `0A` | Line feed | Works; the driver feeds with blank raster rows instead. |
@@ -45,8 +45,7 @@ versions may behave differently.
 ### Job layout used by the driver
 
 ```
-1B 40                      init (once)
-1D 49 F0 <density>         density
+1D 49 F0 <density>         density (no ESC @ – see above)
 1D 76 30 00 30 00 <rows>   one GS v 0 block per page:
 <rows × 48 bytes>          page bitmap + blank rows for the paper feed (last page)
 ```

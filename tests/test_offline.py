@@ -75,11 +75,13 @@ class PrinterJobTest(unittest.TestCase):
         bw = prepare(noisy_image(1680, 400))
         self.assertEqual(bw.width, WIDTH)
         job = build_job([bw], feed_mm=15, density=25)
-        # Init, Dichte, dann genau ein GS-v-0-Block inkl. Vorschub
-        self.assertTrue(job.startswith(b"\x1b\x40\x1d\x49\xf0\x19\x1d\x76\x30\x00\x30\x00"))
-        rows = int.from_bytes(job[12:14], "little")
+        # Kein ESC @ (würde den Rest eines noch druckenden Auftrags verwerfen),
+        # nur Dichte und genau ein GS-v-0-Block inkl. Vorschub
+        self.assertTrue(job.startswith(b"\x1d\x49\xf0\x19\x1d\x76\x30\x00\x30\x00"))
+        self.assertNotIn(b"\x1b\x40", job[:4])
+        rows = int.from_bytes(job[10:12], "little")
         self.assertEqual(rows, bw.height + round(15 * 203 / 25.4))
-        self.assertEqual(len(job), 14 + rows * 48)
+        self.assertEqual(len(job), 12 + rows * 48)
 
     def test_modes(self):
         # Gleichmäßige Graufläche mit schwarzem Balken darüber

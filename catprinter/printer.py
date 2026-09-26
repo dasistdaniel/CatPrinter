@@ -164,15 +164,17 @@ def _gs_v0(data, rows):
     return bytes([0x1D, 0x76, 0x30, 0x00, bpr & 0xFF, bpr >> 8, rows & 0xFF, rows >> 8]) + data
 
 
-def build_job(images, feed_mm=15, density=DEFAULT_DENSITY, init=True):
+def build_job(images, feed_mm=15, density=DEFAULT_DENSITY, init=False):
     """Baut den kompletten ESC/POS-Datenstrom für mehrere Seiten.
 
-    Wie die WalkPrint-App: Init, Dichte (1D 49 F0 n), dann jede Seite als
-    ein zusammenhängender GS-v-0-Block. Aufteilen in mehrere Blöcke führt
-    zu sichtbaren Streifen, weil der Drucker an jeder Blockgrenze neu ansetzt.
+    Dichte (1D 49 F0 n), dann jede Seite als ein zusammenhängender
+    GS-v-0-Block. Aufteilen in mehrere Blöcke führt zu sichtbaren Streifen,
+    weil der Drucker an jeder Blockgrenze neu ansetzt.
 
-    ESC @ verwirft alles, was noch im Puffer des Druckers wartet – beim
-    Aneinanderhängen mehrerer Aufträge darf nur der erste init=True haben.
+    Kein ESC @ (init) am Anfang: Es verwirft alles, was noch im Puffer des
+    Druckers wartet. Folgt ein Auftrag direkt auf den vorigen, während der
+    noch gedruckt wird, würde dessen Ende abgeschnitten. Die Dichte setzt
+    jeder Auftrag ohnehin selbst.
     """
     bpr = WIDTH // 8
     out = bytearray(b"\x1b\x40" if init else b"")
