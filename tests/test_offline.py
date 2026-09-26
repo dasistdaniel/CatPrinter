@@ -1,5 +1,6 @@
 """Tests ohne Drucker: python -m unittest discover tests"""
 import http.client
+import json
 import random
 import threading
 import time
@@ -246,6 +247,33 @@ class ServerTest(unittest.TestCase):
             time.sleep(0.05)
         self.assertEqual(state, server.COMPLETED)
         self.assertEqual(self.svc.printer.printed[0][0].width, WIDTH)
+
+    def http(self, method, path, headers=None):
+        conn = http.client.HTTPConnection("127.0.0.1", self.port, timeout=10)
+        conn.request(method, path, headers=headers or {})
+        resp = conn.getresponse()
+        body = resp.read()
+        conn.close()
+        return resp.status, body
+
+    def test_status_page_and_json(self):
+        status, body = self.http("GET", "/")
+        self.assertEqual(status, 200)
+        self.assertIn(b"status.json", body)
+        status, body = self.http("GET", "/status.json")
+        data = json.loads(body)
+        self.assertEqual((data["state"], data["printed"], data["jobs"]), ("ready", 0, []))
+
+    def test_actions_need_header(self):
+        self.assertEqual(self.http("POST", "/action/test")[0], 403)  # z. B. von fremder Webseite
+        self.assertEqual(self.http("POST", "/action/test", {"X-CatPrinter": "1"})[0], 202)
+        for _ in range(100):
+            if self.svc.printer.printed:
+                break
+            time.sleep(0.02)
+        self.assertEqual(len(self.svc.printer.printed), 1)
+        data = json.loads(self.http("GET", "/status.json")[1])
+        self.assertEqual((data["printed"], data["jobs"][0]["state"]), (1, "done"))
 
     def test_unknown_operation(self):
         self.assertEqual(self.call(0x0033, []).code, ipp.OPERATION_NOT_SUPPORTED)

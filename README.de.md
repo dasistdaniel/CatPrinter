@@ -117,7 +117,7 @@ Drucker aus) und wenn der Akku unter 6,8 V fällt.
 | `python -m catprinter test` | Testseite direkt drucken (ohne Windows) |
 | `python -m catprinter image bild.png` | Bild direkt drucken |
 | `python -m catprinter calibrate 15 25 40` | Schwarzfelder mit verschiedenen Druckdichten drucken |
-| http://127.0.0.1:631/ | Statusseite mit den letzten Aufträgen |
+| http://127.0.0.1:631/ | Statusseite: Zustand, Akku, letzte Aufträge, Einstellungen, Knöpfe für Testseite und Akkuprüfung (aktualisiert sich live, hell/dunkel) |
 
 Optionen: `--port COMx`, `--density N`, `--mode auto|text|photo`, `--log-file DATEI`.
 

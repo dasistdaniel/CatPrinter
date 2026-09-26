@@ -13,7 +13,8 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from PIL import Image
 
-from . import ipp, pwg
+from . import ipp, pwg, statuspage
+from .pages import short_test_page
 from .printer import DEFAULT_DENSITY, DPI, MODES, Printer, PrinterError, prepare
 
 log = logging.getLogger("server")
@@ -114,6 +115,8 @@ class PrintService:
         self.listeners = []   # Callbacks listener(event, **daten), z. B. für das Tray-Icon
         self.status = {}      # zuletzt gemeldeter Druckerstatus (Firmware, VOLT, …)
         self.active = False   # gerade am Drucken?
+        self.checking = False # Akkuabfrage läuft?
+        self.printed = 0      # erfolgreich gedruckte Aufträge seit dem Start
         self._stopped = False
         threading.Thread(target=self._worker, daemon=True).start()
 
@@ -132,10 +135,16 @@ class PrintService:
         def task():
             try:
                 self.status = self.printer.status()
+                self.last_error = None
                 self.emit("status", status=self.status)
             except PrinterError as e:
+                self.last_error = (time.time(), str(e))
                 self.emit("status_failed", error=str(e))
-        self.run_task(task)
+            finally:
+                self.checking = False
+        if not self.checking:
+            self.checking = True
+            self.run_task(task)
 
     def print_image(self, name, img):
         """Druckt ein PIL-Bild über die normale Auftragsverarbeitung (z. B. Testseite)."""
@@ -188,6 +197,7 @@ class PrintService:
             try:
                 self._print(job)
                 job.state = COMPLETED
+                self.printed += 1
                 self.last_error = None
                 log.info("Auftrag %d '%s' gedruckt (%d Seite(n))", job.id, job.name, job.pages)
                 if self.printer.last_status:
@@ -419,20 +429,38 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def do_GET(self):
+        path = self.path.split("?", 1)[0]
+        if path in ("/", "/index.html"):
+            self._send(200, "text/html; charset=utf-8", statuspage.PAGE.encode("utf-8"))
+        elif path == "/status.json":
+            body = json.dumps(statuspage.status_dict(self.service)).encode("utf-8")
+            self._send(200, "application/json", body)
+        else:
+            self._send(404, "text/plain", b"not found")
+
+    def _action(self, name):
+        # Eigener Header: fremde Webseiten können ihn nicht ohne CORS-Vorabfrage
+        # setzen, also keinen Druck über den Browser auslösen
+        if self.headers.get("X-CatPrinter") != "1":
+            self._send(403, "text/plain", b"forbidden")
+            return
         svc = self.service
-        rows = "".join(
-            f"<tr><td>{j.id}</td><td>{_html(j.name)}</td><td>{STATE_REASON[j.state]}</td>"
-            f"<td>{_html(j.message)}</td></tr>" for j in sorted(list(svc.jobs.values()), key=lambda j: -j.id))
-        err = _html(svc.last_error[1]) if svc.last_error else "–"
-        body = (f"<!doctype html><meta charset=utf-8><title>Cat Printer</title>"
-                f"<h1>{_html(svc.cfg['printer_name'])}</h1>"
-                f"<p>COM-Port: {_html(svc.printer.port or 'automatisch')}<br>Letzter Fehler: {err}</p>"
-                f"<table border=1 cellpadding=4><tr><th>#</th><th>Name</th><th>Status</th><th>Meldung</th></tr>"
-                f"{rows}</table>").encode("utf-8")
-        self._send(200, "text/html; charset=utf-8", body)
+        if name == "test":
+            volts = statuspage.battery_volts(svc.status)
+            info = f"Akku {volts:.2f} V".replace(".", ",") if volts else ""
+            svc.print_image("Testseite", short_test_page(info))
+        elif name == "battery":
+            svc.refresh_status()
+        else:
+            self._send(404, "text/plain", b"unknown action")
+            return
+        self._send(202, "text/plain", b"ok")
 
     def do_POST(self):
         body = self._read_body()
+        if self.path.startswith("/action/"):
+            self._action(self.path[len("/action/"):])
+            return
         if self.headers.get("Content-Type", "").split(";")[0].strip() != "application/ipp":
             self._send(400, "text/plain", b"expected application/ipp")
             return
@@ -557,10 +585,6 @@ def _format_ok(fmt, doc):
     if fmt in (None, "application/octet-stream", "image/png", "image/jpeg"):
         return doc[:8] == b"\x89PNG\r\n\x1a\n" or doc[:3] == b"\xff\xd8\xff"
     return False
-
-
-def _html(text):
-    return (str(text).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;"))
 
 
 def serve(cfg, save_jobs_dir=None):

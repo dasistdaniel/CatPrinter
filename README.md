@@ -122,7 +122,7 @@ the battery drops below 6.8 V.
 | `python -m catprinter test` | Print a test page directly (bypasses Windows) |
 | `python -m catprinter image picture.png` | Print an image file directly |
 | `python -m catprinter calibrate 15 25 40` | Print black test blocks at several density levels |
-| http://127.0.0.1:631/ | Status page with the latest jobs |
+| http://127.0.0.1:631/ | Status page: state, battery, recent jobs, settings, buttons for test page and battery check (updates live, light/dark mode) |
 
 Options: `--port COMx` (skip auto-detection), `--density N`, `--mode auto|text|photo`,
 `--log-file FILE`.
@@ -175,6 +175,7 @@ server with a fake printer.
 | `catprinter/server.py` | IPP server, printer/job attributes, job queue, events |
 | `catprinter/tray.py` | Tray icon, menu and notifications |
 | `catprinter/pages.py` | Test and calibration pages |
+| `catprinter/statuspage.py` | Status page (HTML) and its JSON data |
 | `catprinter/__main__.py` | Command line interface |
 | `autostart.ps1` | Startup-folder shortcut |
 | `docs/PROTOCOL.md` | What was learned about the printer and the Windows IPP client |
