@@ -153,6 +153,7 @@ class Printer:
         self.port = port
         self.name_prefix = name_prefix
         self.chunk_delay = CHUNK_DELAY
+        self.last_status = {}
 
     def _resolve_port(self):
         if self.port:
@@ -183,11 +184,8 @@ class Printer:
     def status(self):
         """Fragt Firmware/Akku ab, z. B. {'HV': 'H1.0', 'SV': 'V1.01', 'VOLT': '7260mv', 'DPI': '384'}."""
         with self._open() as ser:
-            ser.reset_input_buffer()
-            ser.write(b"\x1e\x47\x03")
-            time.sleep(0.5)
-            text = ser.read(ser.in_waiting or 0).decode("ascii", "replace").strip("\x00")
-        return dict(p.split("=", 1) for p in text.split(",") if "=" in p)
+            self.last_status = _query_status(ser)
+        return self.last_status
 
     def print_images(self, images, feed_mm=15, density=DEFAULT_DENSITY):
         self.send(build_job(images, feed_mm, density))
@@ -214,3 +212,22 @@ class Printer:
                 time.sleep(2.0)
             except serial.SerialException as e:
                 raise PrinterError(f"Verbindung während des Drucks abgebrochen: {e}") from e
+            # Akkustand gleich über dieselbe Verbindung mitnehmen (ohne neuen Verbindungsaufbau)
+            try:
+                self.last_status = _query_status(ser) or self.last_status
+            except serial.SerialException:
+                pass
+
+
+def _query_status(ser):
+    ser.reset_input_buffer()
+    ser.write(b"\x1e\x47\x03")
+    time.sleep(0.5)
+    text = ser.read(ser.in_waiting or 0).decode("ascii", "replace").strip("\x00")
+    return dict(p.split("=", 1) for p in text.split(",") if "=" in p)
+
+
+def battery_volts(status):
+    """'7180mv' -> 7.18 (oder None)."""
+    match = re.match(r"(\d+)\s*mv", str(status.get("VOLT", "")), re.I)
+    return int(match.group(1)) / 1000 if match else None

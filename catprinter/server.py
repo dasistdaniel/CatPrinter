@@ -111,7 +111,43 @@ class PrintService:
         self.start_time = int(time.time())
         self.last_error = None
         self.save_jobs_dir = save_jobs_dir
+        self.listeners = []   # Callbacks listener(event, **daten), z. B. für das Tray-Icon
+        self.status = {}      # zuletzt gemeldeter Druckerstatus (Firmware, VOLT, …)
+        self.active = False   # gerade am Drucken?
+        self._stopped = False
         threading.Thread(target=self._worker, daemon=True).start()
+
+    def emit(self, event, **data):
+        for listener in list(self.listeners):
+            try:
+                listener(event, **data)
+            except Exception:  # noqa: BLE001 – ein fehlerhafter Listener darf den Druck nicht stören
+                log.exception("Fehler im Listener für %s", event)
+
+    def run_task(self, fn):
+        """Führt fn im Druck-Thread aus – so greift nie mehr als einer gleichzeitig auf den COM-Port zu."""
+        self.queue.put(fn)
+
+    def refresh_status(self):
+        def task():
+            try:
+                self.status = self.printer.status()
+                self.emit("status", status=self.status)
+            except PrinterError as e:
+                self.emit("status_failed", error=str(e))
+        self.run_task(task)
+
+    def print_image(self, name, img):
+        """Druckt ein PIL-Bild über die normale Auftragsverarbeitung (z. B. Testseite)."""
+        buf = io.BytesIO()
+        img.save(buf, "PNG")
+        job = self.new_job(name, "CatPrinterDriver", 1)
+        self.submit(job, buf.getvalue())
+        return job
+
+    def stop(self):
+        self._stopped = True
+        self.queue.put(None)
 
     def uptime(self):
         return max(1, int(time.time()) - self.start_time)
@@ -135,22 +171,37 @@ class PrintService:
     def _worker(self):
         while True:
             job = self.queue.get()
+            if job is None or self._stopped:
+                return
+            if callable(job):
+                try:
+                    job()
+                except Exception:  # noqa: BLE001
+                    log.exception("Fehler in Hintergrundaufgabe")
+                continue
             if job.state == CANCELED:
                 continue
             job.state = PROCESSING
             job.processing = self.uptime()
+            self.active = True
+            self.emit("job_started", job=job)
             try:
                 self._print(job)
                 job.state = COMPLETED
                 self.last_error = None
                 log.info("Auftrag %d '%s' gedruckt (%d Seite(n))", job.id, job.name, job.pages)
+                if self.printer.last_status:
+                    self.status = self.printer.last_status
+                self.emit("job_done", job=job, status=self.status)
             except Exception as e:  # noqa: BLE001 – jeder Fehler bricht nur diesen Auftrag ab
                 job.state = ABORTED
                 job.message = str(e)
                 self.last_error = (time.time(), str(e))
                 log.error("Auftrag %d abgebrochen: %s", job.id, e,
                           exc_info=not isinstance(e, PrinterError))
+                self.emit("job_failed", job=job, error=str(e))
             finally:
+                self.active = False
                 job.completed = self.uptime()
                 job.data = None
 
@@ -166,7 +217,7 @@ class PrintService:
                 log.info("  %r", hdr)
                 pages.append(img)
         else:
-            pages = [Image.open(io.BytesIO(data))]  # PNG/JPEG direkt
+            pages = [Image.open(io.BytesIO(data))]  # PNG/JPEG direkt (auch Testseite aus dem Tray)
         rotate = self.cfg.get("rotate_180", True)
         mode = image_mode(job.quality, self.cfg.get("image_mode", "auto"))
         log.info("  Bildmodus: %s (Druckqualität %s)", mode, job.quality)

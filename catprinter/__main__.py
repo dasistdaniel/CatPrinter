@@ -1,57 +1,19 @@
-"""python -m catprinter [serve|status|test|image DATEI|calibrate WERTE...] [--verbose] [--port COMx]"""
+"""python -m catprinter [serve|tray|status|test|image DATEI|calibrate WERTE...] [--verbose] [--port COMx]"""
 import argparse
 import logging
 import sys
 
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image
 
-from .printer import DEFAULT_DENSITY, WIDTH, Printer, PrinterError, build_job, prepare
-from .server import CONFIG_FILE, load_config, serve
-
-
-def _fonts():
-    try:
-        return ImageFont.truetype("arial.ttf", 34), ImageFont.truetype("arial.ttf", 20)
-    except OSError:
-        return ImageFont.load_default(), ImageFont.load_default()
-
-
-def calibration_page(density):
-    """Beschriftung, schwarzer Block, 50-%-Raster und feine Linien für eine Dichtestufe."""
-    big, small = _fonts()
-    img = Image.new("L", (WIDTH, 250), 255)
-    d = ImageDraw.Draw(img)
-    d.text((8, 4), f"Dichte {density}", font=big, fill=0)
-    d.rectangle([0, 50, WIDTH - 1, 150], fill=0)
-    d.rectangle([0, 160, WIDTH - 1, 200], fill=128)
-    for x in range(0, WIDTH, 6):
-        d.line([(x, 210), (x, 245)], fill=0)
-    return img
-
-
-def test_page():
-    img = Image.new("L", (WIDTH, 900), 255)
-    d = ImageDraw.Draw(img)
-    try:
-        big, small = ImageFont.truetype("arial.ttf", 34), ImageFont.truetype("arial.ttf", 20)
-    except OSError:
-        big = small = ImageFont.load_default()
-    d.rectangle([0, 0, WIDTH - 1, img.height - 1], outline=0, width=3)
-    d.text((16, 16), "Testseite", font=big, fill=0)
-    y = 70
-    for i in range(24):
-        d.text((16, y), f"Zeile {i + 1:02d}: Das ist ein langer Testdruck", font=small, fill=0)
-        y += 26
-    for x in range(WIDTH - 32):
-        d.line([(16 + x, y + 10), (16 + x, y + 60)], fill=int(255 * x / (WIDTH - 33)))
-    d.text((16, img.height - 40), "ENDE", font=small, fill=0)
-    return img
+from .pages import calibration_page, test_page
+from .printer import DEFAULT_DENSITY, Printer, PrinterError, build_job, prepare
+from .server import CONFIG_DIR, CONFIG_FILE, load_config, serve
 
 
 def main():
     ap = argparse.ArgumentParser(prog="catprinter")
     ap.add_argument("command", nargs="?", default="serve",
-                    choices=["serve", "status", "test", "image", "calibrate"])
+                    choices=["serve", "tray", "status", "test", "image", "calibrate"])
     ap.add_argument("file", nargs="*", help="Bilddatei (image) bzw. Dichtewerte (calibrate)")
     ap.add_argument("--density", type=int, help="Druckdichte für test/image")
     ap.add_argument("--mode", choices=["auto", "text", "photo"], help="Bildmodus für test/image")
@@ -62,6 +24,11 @@ def main():
     ap.add_argument("--log-file", metavar="DATEI", help="Log in eine Datei schreiben (nötig mit pythonw)")
     args = ap.parse_args()
 
+    if args.command == "tray" and not args.log_file:
+        # Tray läuft ohne Konsole (pythonw) – ohne Datei ginge das Log verloren
+        import os
+        os.makedirs(CONFIG_DIR, exist_ok=True)
+        args.log_file = os.path.join(CONFIG_DIR, "server.log")
     log_kwargs = {"filename": args.log_file, "encoding": "utf-8"} if args.log_file else {}
     logging.basicConfig(level=logging.DEBUG if args.verbose else logging.INFO,
                         format="%(asctime)s %(levelname)-7s %(name)s: %(message)s",
@@ -69,6 +36,11 @@ def main():
     cfg = load_config()
     if args.port:
         cfg["com_port"] = args.port
+
+    if args.command == "tray":
+        from .tray import TrayApp  # pystray nur laden, wenn gebraucht
+        logging.info("Konfiguration: %s", CONFIG_FILE)
+        return TrayApp(args.save_jobs).run()
 
     if args.command == "serve":
         logging.info("Konfiguration: %s", CONFIG_FILE)

@@ -19,7 +19,7 @@ New-Item -ItemType Directory -Force (Split-Path $log) | Out-Null
 $shell = New-Object -ComObject WScript.Shell
 $lnk = $shell.CreateShortcut($link)
 $lnk.TargetPath = $pythonw
-$lnk.Arguments = "-m catprinter serve --log-file `"$log`""
+$lnk.Arguments = "-m catprinter tray --log-file `"$log`""   # Druckserver + Symbol im Infobereich
 $lnk.WorkingDirectory = $PSScriptRoot   # damit "-m catprinter" gefunden wird
 $lnk.Description = "Cat Printer IPP-Server"
 $lnk.Save()

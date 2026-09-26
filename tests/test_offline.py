@@ -121,12 +121,69 @@ class PrinterJobTest(unittest.TestCase):
 
 
 class FakePrinter:
-    def __init__(self):
+    def __init__(self, fail=False):
         self.printed = []
         self.port = "FAKE"
+        self.fail = fail
+        self.last_status = {"VOLT": "7100mv"}
 
     def print_images(self, images, feed_mm=15, density=25):
+        if self.fail:
+            from catprinter.printer import PrinterError
+            raise PrinterError("COM99 lässt sich nicht öffnen")
         self.printed.append(images)
+
+    def status(self):
+        return self.last_status
+
+
+class ServiceTest(unittest.TestCase):
+    def make_service(self, fail=False):
+        svc = server.PrintService(dict(server.DEFAULT_CONFIG, uuid="x"))
+        svc.printer = FakePrinter(fail)
+        events = []
+        svc.listeners.append(lambda event, **data: events.append((event, data)))
+        self.addCleanup(svc.stop)
+        return svc, events
+
+    def wait_for(self, events, name):
+        for _ in range(100):
+            if any(e == name for e, _d in events):
+                return dict(events)[name]
+            time.sleep(0.02)
+        self.fail(f"Ereignis {name} kam nicht: {events}")
+
+    def test_print_image_emits_done_with_battery(self):
+        from catprinter.pages import short_test_page
+        svc, events = self.make_service()
+        job = svc.print_image("Testseite", short_test_page("Akku 7,10 V"))
+        data = self.wait_for(events, "job_done")
+        self.assertIs(data["job"], job)
+        self.assertEqual(data["status"], {"VOLT": "7100mv"})
+        self.assertEqual(svc.printer.printed[0][0].width, WIDTH)
+        self.assertEqual(events[0][0], "job_started")
+
+    def test_failure_emits_job_failed(self):
+        svc, events = self.make_service(fail=True)
+        job = svc.print_image("Test", Image.new("L", (WIDTH, 50), 0))
+        data = self.wait_for(events, "job_failed")
+        self.assertIn("COM99", data["error"])
+        self.assertEqual(job.state, server.ABORTED)
+
+    def test_refresh_status(self):
+        svc, events = self.make_service()
+        svc.refresh_status()
+        self.assertEqual(self.wait_for(events, "status")["status"], {"VOLT": "7100mv"})
+
+    def test_battery_volts(self):
+        from catprinter.printer import battery_volts
+        self.assertEqual(battery_volts({"VOLT": "7180mv"}), 7.18)
+        self.assertIsNone(battery_volts({}))
+
+    def test_tray_icon_image(self):
+        from catprinter.tray import make_icon
+        for state in ("ready", "printing", "error"):
+            self.assertEqual(make_icon(state).size, (64, 64))
 
 
 class ServerTest(unittest.TestCase):

@@ -62,13 +62,27 @@ pip install -r requirements.txt
    ```powershell
    Add-Printer -Name "Cat Printer" -IppURL "http://127.0.0.1:631/ipp/print"
    ```
-4. **Server bei jeder Anmeldung automatisch starten** (optional, ohne Adminrechte):
+4. **Bei jeder Anmeldung automatisch starten** (optional, ohne Adminrechte):
    ```powershell
-   .\autostart.ps1            # Verknüpfung im Autostart-Ordner (läuft unsichtbar per pythonw)
+   .\autostart.ps1            # Verknüpfung im Autostart-Ordner: Server + Tray-Symbol, ohne Konsolenfenster
    .\autostart.ps1 -Remove    # wieder entfernen
    ```
    Log: `%APPDATA%\CatPrinterDriver\server.log`. Wird der Projektordner
    verschoben, `autostart.ps1` einfach erneut ausführen.
+
+## Tray-Symbol
+
+`python -m catprinter tray` (so startet ihn der Autostart) führt den
+Druckserver zusammen mit einem Katzen-Symbol im Infobereich der Taskleiste
+aus. Der Punkt zeigt den Zustand: 🟢 bereit · 🔵 druckt · 🔴 Fehler.
+
+Rechtsklick-Menü: Status und Akkuspannung (wird nach jedem Druck gemessen),
+*Testseite drucken*, *Akkustand prüfen*, *Statusseite öffnen* (auch per
+Doppelklick), *Log öffnen*, *Einstellungen bearbeiten*, *Server neu starten*
+(lädt `config.json` neu), *Beenden*.
+
+Windows-Benachrichtigungen erscheinen, wenn ein Druck fehlschlägt (z. B.
+Drucker aus) und wenn der Akku unter 6,8 V fällt.
 
 ## Drucken
 
@@ -96,7 +110,8 @@ pip install -r requirements.txt
 
 | Befehl | Zweck |
 |---|---|
-| `python -m catprinter serve` | IPP-Druckserver starten (Standard) |
+| `python -m catprinter serve` | IPP-Druckserver in der Konsole starten (Standard) |
+| `python -m catprinter tray` | Druckserver mit Tray-Symbol starten (Log in `%APPDATA%\CatPrinterDriver\server.log`) |
 | `python -m catprinter serve -v --save-jobs ORDNER` | Ausführliches Log, empfangene Aufträge speichern |
 | `python -m catprinter status` | Firmware, Akkuspannung, COM-Port anzeigen |
 | `python -m catprinter test` | Testseite direkt drucken (ohne Windows) |
@@ -109,7 +124,7 @@ Optionen: `--port COMx`, `--density N`, `--mode auto|text|photo`, `--log-file DA
 ## Einstellungen
 
 `%APPDATA%\CatPrinterDriver\config.json` (wird beim ersten Start angelegt;
-nach Änderungen Server neu starten, z. B. ab- und wieder anmelden):
+nach Änderungen im Tray-Menü *Server neu starten* wählen):
 
 | Schlüssel | Standard | Bedeutung |
 |---|---|---|
@@ -129,7 +144,7 @@ nach Änderungen Server neu starten, z. B. ab- und wieder anmelden):
 | Problem | Ursache / Lösung |
 |---|---|
 | Auftrag bricht nach ca. 20 s ab | Drucker aus, Akku leer oder mit dem Handy verbunden (nur eine Bluetooth-Verbindung möglich). Die Warteschlange bleibt nicht hängen. |
-| Aufträge hängen dauerhaft | Server läuft nicht – starten oder Autostart einrichten. |
+| Aufträge hängen dauerhaft | Server läuft nicht (kein Katzen-Symbol im Infobereich) – starten oder Autostart einrichten. |
 | `Add-Printer`: Zugriff verweigert | PowerShell als Administrator starten. |
 | Druck zu blass | Akku laden; `density` erhöhen (mit `calibrate` testen). |
 | Dünne hellere Linien in großen, komplett schwarzen Flächen | Zeilen, in denen alle 384 Punkte schwarz sind, bekommen im Akkubetrieb etwas weniger Heizleistung. Solche Bilder mit angestecktem USB-Kabel (Laden) drucken – im Test waren die Linien dann weg. Text und normale Bilder sind nicht betroffen. |

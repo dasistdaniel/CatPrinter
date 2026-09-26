@@ -69,12 +69,25 @@ pip install -r requirements.txt
    ```powershell
    Add-Printer -Name "Cat Printer" -IppURL "http://127.0.0.1:631/ipp/print"
    ```
-4. **Start the server automatically at logon** (optional, no admin needed):
+4. **Start automatically at logon** (optional, no admin needed):
    ```powershell
-   .\autostart.ps1            # creates a shortcut in the Startup folder (runs hidden via pythonw)
+   .\autostart.ps1            # shortcut in the Startup folder: server + tray icon, no console window
    .\autostart.ps1 -Remove    # removes it again
    ```
    The log file is then `%APPDATA%\CatPrinterDriver\server.log`.
+
+## Tray icon
+
+`python -m catprinter tray` (used by the autostart) runs the print server
+together with a cat icon in the notification area. The dot shows the state:
+🟢 ready · 🔵 printing · 🔴 error.
+
+Right-click menu: status and battery voltage (measured after every print),
+*Print test page*, *Check battery*, *Open status page* (also on double-click),
+*Open log*, *Edit settings*, *Restart server* (reloads `config.json`), *Quit*.
+
+Windows notifications appear when a print fails (e.g. printer off) and when
+the battery drops below 6.8 V.
 
 ## Printing
 
@@ -102,7 +115,8 @@ pip install -r requirements.txt
 
 | Command | Purpose |
 |---|---|
-| `python -m catprinter serve` | Run the IPP print server (default command) |
+| `python -m catprinter serve` | Run the IPP print server in the console (default command) |
+| `python -m catprinter tray` | Run the print server with tray icon (logs to `%APPDATA%\CatPrinterDriver\server.log`) |
 | `python -m catprinter serve -v --save-jobs DIR` | Verbose log, keep received jobs for debugging |
 | `python -m catprinter status` | Show firmware, battery voltage and COM port |
 | `python -m catprinter test` | Print a test page directly (bypasses Windows) |
@@ -116,7 +130,7 @@ Options: `--port COMx` (skip auto-detection), `--density N`, `--mode auto|text|p
 ## Configuration
 
 `%APPDATA%\CatPrinterDriver\config.json` is created on first start.
-Restart the server after changing it.
+After changing it, choose *Restart server* in the tray menu.
 
 | Key | Default | Meaning |
 |---|---|---|
@@ -136,7 +150,7 @@ Restart the server after changing it.
 | Problem | Cause / fix |
 |---|---|
 | Job fails after ~20 s | Printer is off, battery empty, or connected to the phone (Bluetooth serial allows only one connection). The job is aborted and doesn't block the queue. |
-| Jobs stay "printing" forever | The server isn't running – start it or set up the autostart. |
+| Jobs stay "printing" forever | The server isn't running (no cat icon in the notification area) – start it or set up the autostart. |
 | `Add-Printer`: access denied | Run PowerShell as Administrator. |
 | Output too light | Charge the battery; raise `density` (see `calibrate`). |
 | Thin lighter lines in large all-black areas | Rows where all 384 dots are black get slightly less heat on battery power. Print such images with the USB cable plugged in (charging) – in our test the lines disappeared. Text and normal images are not affected. |
@@ -158,7 +172,9 @@ server with a fake printer.
 | `catprinter/ipp.py` | Minimal IPP/1.1–2.0 message encoder/decoder (RFC 8010) |
 | `catprinter/pwg.py` | PWG raster decoder (+ encoder for tests) |
 | `catprinter/printer.py` | Image preparation, ESC/POS job builder, serial transport, port detection |
-| `catprinter/server.py` | IPP server, printer/job attributes, job queue |
+| `catprinter/server.py` | IPP server, printer/job attributes, job queue, events |
+| `catprinter/tray.py` | Tray icon, menu and notifications |
+| `catprinter/pages.py` | Test and calibration pages |
 | `catprinter/__main__.py` | Command line interface |
 | `autostart.ps1` | Startup-folder shortcut |
 | `docs/PROTOCOL.md` | What was learned about the printer and the Windows IPP client |
