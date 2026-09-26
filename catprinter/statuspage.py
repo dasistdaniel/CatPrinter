@@ -10,7 +10,7 @@ def status_dict(service):
     """Aktueller Zustand für /status.json."""
     cfg = service.cfg
     error = service.last_error if service.last_error and time.time() - service.last_error[0] < 120 else None
-    state = "printing" if service.active else ("error" if error else "ready")
+    state = ("cooling" if service.cooling else "printing") if service.active else ("error" if error else "ready")
     jobs = sorted(list(service.jobs.values()), key=lambda j: -j.id)[:20]
     return {
         "name": cfg.get("printer_name", "Cat Printer"),
@@ -90,6 +90,8 @@ h1 { font-size: 24px; margin: 0; line-height: 1.2; }
 .pill.printing { color: var(--busy); background: var(--busy-bg); }
 .pill.printing::before { animation: pulse 1s ease-in-out infinite; }
 .pill.error { color: var(--err); background: var(--err-bg); }
+.pill.cooling { color: var(--wait); background: var(--wait-bg); }
+.pill.cooling::before { animation: pulse 1.6s ease-in-out infinite; }
 .pill.offline { color: var(--muted); background: var(--neutral-bg); }
 @keyframes pulse { 50% { opacity: .25; } }
 .alert {
@@ -375,7 +377,7 @@ footer { color: var(--muted); font-size: 12px; margin-top: 24px; text-align: cen
 </main>
 <script>
 const $ = (id) => document.getElementById(id);
-const STATE = { ready: "Bereit", printing: "Druckt …", error: "Fehler" };
+const STATE = { ready: "Bereit", printing: "Druckt …", cooling: "Zu heiß – kühlt ab …", error: "Fehler" };
 const JOB = { done: "Gedruckt", printing: "Druckt", pending: "Wartet", failed: "Fehlgeschlagen", canceled: "Abgebrochen" };
 const LOW_VOLTS = 6.8;
 let saved = null;   // Einstellungen laut Server

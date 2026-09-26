@@ -253,6 +253,7 @@ tray menu afterwards.
 | Jobs stay "printing" forever | The server isn't running (no cat icon in the notification area) – start it or set up the autostart. |
 | `Add-Printer`: access denied | Run PowerShell as Administrator. |
 | Output too light | Charge the battery; raise `density` (see `calibrate`). |
+| Printer stops in the middle of a print, status "Zu heiß – kühlt ab" | Overheat protection after many dark prints in a row. The printer pauses about 1–2 minutes and then continues by itself; before the next job the driver waits until it has cooled down. Nothing is lost. |
 | Photos too dark | Raise *„Foto-Helligkeit“* on the status page (try +20 %) and compare with *„Nochmal drucken“* (print again) in the history. |
 | Phone doesn't find the printer | Sharing on? Same Wi-Fi? Network profile *Private*? Firewall rule present (status page shows warnings)? On Android, the *Default Print Service* must be enabled. |
 | Thin lighter lines in large all-black areas | Rows where all 384 dots are black get slightly less heat on battery power. Print such images with the USB cable plugged in (charging) – in our test the lines disappeared. Text and normal images are not affected. |

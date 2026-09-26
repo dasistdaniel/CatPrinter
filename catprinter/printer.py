@@ -16,6 +16,11 @@ MAX_ROWS = 0xFFFF      # Höhe eines GS-v-0-Blocks ist 16 Bit
 DEFAULT_DENSITY = 40   # per Kalibrierung ermittelt (WalkPrint schickt 25 = 1D 49 F0 19)
 CHUNK = 256            # Bytes pro Schreibvorgang
 CHUNK_DELAY = 0.03     # Pause zwischen Schreibvorgängen (Puffer des Druckers)
+WRITE_TIMEOUT = 300    # Hitzepause des Druckers: Schreiben blockiert, gemessen ~80 s
+STALL_SECONDS = 3      # blockiert ein Schreibvorgang so lange, pausiert der Drucker
+HOT_BIT = 0x40         # DLE EOT 3: Druckkopf zu heiß
+COOL_POLL = 5          # Sekunden zwischen Abfragen beim Abkühlen
+COOL_MAX_WAIT = 240    # höchstens so lange vor einem Druck warten
 
 
 class PrinterError(Exception):
@@ -192,6 +197,7 @@ class Printer:
         self.name_prefix = name_prefix
         self.chunk_delay = CHUNK_DELAY
         self.last_status = {}
+        self.last_hot = False
 
     def _resolve_port(self):
         if self.port:
@@ -208,7 +214,7 @@ class Printer:
         port = self._resolve_port()
         for attempt in range(1, attempts + 1):
             try:
-                ser = serial.Serial(port, 115200, timeout=1, write_timeout=15)
+                ser = serial.Serial(port, 115200, timeout=1, write_timeout=WRITE_TIMEOUT)
                 break
             except serial.SerialException as e:
                 if attempt == attempts:
@@ -225,20 +231,31 @@ class Printer:
             self.last_status = _query_status(ser)
         return self.last_status
 
-    def print_images(self, images, feed_mm=15, density=DEFAULT_DENSITY):
-        self.send(build_job(images, feed_mm, density))
+    def print_images(self, images, feed_mm=15, density=DEFAULT_DENSITY, notify=None):
+        self.send(build_job(images, feed_mm, density), notify)
 
-    def send(self, job):
+    def send(self, job, notify=None):
+        """Sendet einen Auftrag. notify(ereignis) meldet Hitze:
+        "cooling" (wartet vor dem Druck), "cooled", "paused_hot" (Pause mitten im Druck)."""
+        notify = notify or (lambda _e: None)
         log.info("Sende %d Bytes (Pause %.0f ms je %d Bytes)", len(job), self.chunk_delay * 1000, CHUNK)
         with self._open() as ser:
             try:
+                self._wait_until_cool(ser, notify)
                 start = time.monotonic()
                 slowest = 0.0
+                paused = False
                 for i in range(0, len(job), CHUNK):
                     t = time.monotonic()
                     ser.write(job[i:i + CHUNK])
                     ser.flush()
-                    slowest = max(slowest, time.monotonic() - t)
+                    took = time.monotonic() - t
+                    slowest = max(slowest, took)
+                    if took > STALL_SECONDS and not paused:
+                        # Drucker nimmt nichts mehr an: Hitzeschutz hat mitten im Druck angehalten
+                        paused = True
+                        log.warning("Drucker pausiert mitten im Druck (vermutlich zu heiß)")
+                        notify("paused_hot")
                     if self.chunk_delay:
                         time.sleep(self.chunk_delay)
                     if ser.in_waiting:
@@ -253,8 +270,39 @@ class Printer:
             # Akkustand gleich über dieselbe Verbindung mitnehmen (ohne neuen Verbindungsaufbau)
             try:
                 self.last_status = _query_status(ser) or self.last_status
+                self.last_hot = is_hot(ser)
+                if self.last_hot:
+                    log.info("Druckkopf nach dem Druck heiß")
             except serial.SerialException:
                 pass
+
+    def _wait_until_cool(self, ser, notify):
+        """Vor dem Druck: Ist der Kopf noch heiß, abwarten statt mitten im Bild zu pausieren."""
+        if not is_hot(ser):
+            return
+        log.info("Druckkopf heiß – warte vor dem Druck (max. %d s)", COOL_MAX_WAIT)
+        notify("cooling")
+        start = time.monotonic()
+        while time.monotonic() - start < COOL_MAX_WAIT:
+            time.sleep(COOL_POLL)
+            if not is_hot(ser):
+                break
+        log.info("Abgekühlt nach %.0f s", time.monotonic() - start)
+        notify("cooled")
+
+
+def is_hot(ser):
+    """Hitzeschutz aktiv? DLE EOT 3 (Fehlerstatus): Bit 0x40 ist gesetzt, solange der Kopf zu heiß ist.
+
+    Gemessen: kalt 0x12, nach 5 dunklen Fotos am Stück 0x52; nach ca. 1 Minute wieder 0x12.
+    """
+    ser.reset_input_buffer()
+    ser.write(b"\x10\x04\x03")
+    deadline = time.monotonic() + 1.0
+    while time.monotonic() < deadline and not ser.in_waiting:
+        time.sleep(0.05)
+    reply = ser.read(ser.in_waiting or 0)
+    return bool(reply) and bool(reply[-1] & HOT_BIT)
 
 
 def _query_status(ser):

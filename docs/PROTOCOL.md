@@ -39,6 +39,8 @@ versions may behave differently.
 | `1E 47 03` | Status query | Reply: `HV=H1.0,SV=V1.01,VOLT=7260mv,DPI=384,\0` (`DPI` is actually the dot width). |
 | `1D 67 39` | Serial number query | Reply: `sn:<serial>.\0` |
 | `1D 67 69` | Product info query | Reply: `public id:0202.\0` |
+| `10 04 03` | `DLE EOT 3` error status (real-time) | `0x12` normal, `0x52` = bit 0x40 set: print head too hot |
+| `10 04 04` | `DLE EOT 4` paper status | `0x12` = paper present |
 
 ### Job layout used by the driver
 
@@ -66,6 +68,18 @@ versions may behave differently.
   is the battery not delivering enough power. Pacing and block layout
   made no difference; printing with the USB cable plugged in (charging,
   7.18 V) removed the lines in a test with a full-width black block.
+- **Overheat protection.** Printing five dark photos in a row (~60 % black,
+  ~30 cm in under 20 s) made the printer stop in the middle of the sixth.
+  While paused it accepts no data (RFCOMM flow control blocks the writes –
+  sending took 80 s instead of 4 s) and answers `1E 47 03` with
+  `err:` + `0x10` + `.` instead of the normal status. `DLE EOT 3`
+  (`10 04 03`, error status) returns `0x52` instead of `0x12`: **bit 0x40 =
+  print head too hot**. The bit stayed set for roughly another minute after
+  the print had finished, then went back to `0x12`. No temperature value is
+  reported. The driver therefore checks the bit before each job and waits
+  (polling every 5 s, max. 4 min) instead of letting the printer pause in the
+  middle of an image, uses a 300 s write timeout, and reports a pause detected
+  by a blocked write (> 3 s).
 - Battery voltage drops noticeably during long sessions (7.28 V → 6.98 V in
   ~20 minutes of testing), and prints get lighter with it.
 - **USB is charge-only.** When plugged into a PC, Windows reports

@@ -22,8 +22,8 @@ log = logging.getLogger("tray")
 LOG_FILE = os.path.join(CONFIG_DIR, "server.log")
 LOW_BATTERY_VOLTS = 6.8
 
-COLORS = {"ready": (46, 160, 67), "printing": (31, 111, 235), "error": (218, 54, 51)}
-LABELS = {"ready": "Bereit", "printing": "Druckt …", "error": "Fehler"}
+COLORS = {"ready": (46, 160, 67), "printing": (31, 111, 235), "cooling": (224, 150, 20), "error": (218, 54, 51)}
+LABELS = {"ready": "Bereit", "printing": "Druckt …", "cooling": "Zu heiß – kühlt ab …", "error": "Fehler"}
 
 
 def make_icon(state):
@@ -127,6 +127,15 @@ class TrayApp:
             threading.Thread(target=self._share_changed, args=(data["enabled"],), daemon=True).start()
         elif event == "job_started":
             self.set_state("printing", data["job"].name)
+        elif event == "hot":
+            self.set_state("cooling", "Druckkopf zu heiß")
+            self.icon.notify("Der Druckkopf ist zu heiß (viele dunkle Flächen am Stück). "
+                             + ("Der nächste Druck startet, sobald er abgekühlt ist – meist nach 1–2 Minuten."
+                                if data.get("waiting") else
+                                "Der Drucker pausiert kurz und druckt dann von selbst weiter."),
+                             "Cat Printer kühlt ab")
+        elif event == "cooled":
+            self.set_state("printing", "")
         elif event == "job_done":
             self.update_battery(data.get("status") or {})
             self.set_state("ready", "")

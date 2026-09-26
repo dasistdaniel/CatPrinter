@@ -253,6 +253,7 @@ starten* wählen):
 | Aufträge hängen dauerhaft | Server läuft nicht (kein Katzen-Symbol im Infobereich) – starten oder Autostart einrichten. |
 | `Add-Printer`: Zugriff verweigert | PowerShell als Administrator starten. |
 | Druck zu blass | Akku laden; `density` erhöhen (mit `calibrate` testen). |
+| Drucker hält mitten im Druck an, Status „Zu heiß – kühlt ab“ | Hitzeschutz nach vielen dunklen Drucken am Stück. Der Drucker pausiert etwa 1–2 Minuten und macht dann von selbst weiter; vor dem nächsten Auftrag wartet der Treiber, bis er abgekühlt ist. Es geht nichts verloren. |
 | Fotos zu dunkel | *„Foto-Helligkeit“* auf der Statusseite erhöhen (z. B. +20 %) und mit *„Nochmal drucken“* im Verlauf vergleichen. |
 | Handy findet den Drucker nicht | Freigabe an? Gleiches WLAN? Netzwerkprofil *Privat*? Firewall-Regel vorhanden (Statusseite zeigt Warnungen)? Unter Android muss der *Standard-Druckdienst* an sein. |
 | Dünne hellere Linien in großen, komplett schwarzen Flächen | Zeilen, in denen alle 384 Punkte schwarz sind, bekommen im Akkubetrieb etwas weniger Heizleistung. Solche Bilder mit angestecktem USB-Kabel (Laden) drucken – im Test waren die Linien dann weg. Text und normale Bilder sind nicht betroffen. |

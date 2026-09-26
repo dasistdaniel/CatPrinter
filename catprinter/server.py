@@ -178,6 +178,7 @@ class PrintService:
         self.status = {}      # zuletzt gemeldeter Druckerstatus (Firmware, VOLT, …)
         self.active = False   # gerade am Drucken?
         self.checking = False # Akkuabfrage läuft?
+        self.cooling = False  # Drucker zu heiß, wartet/pausiert
         self.printed = 0      # erfolgreich gedruckte Aufträge seit dem Start
         self.net_status = {}  # Netzwerkfreigabe: Adressen, Firewall, Netzwerkprofil (setzt das Tray)
         self.history = History(os.path.join(os.path.dirname(self.config_file), "history"))
@@ -336,7 +337,19 @@ class PrintService:
         images = images * max(1, job.copies)
         job.pages = len(images)
         density = job.density or self.cfg.get("density", DEFAULT_DENSITY)
-        self.printer.print_images(images, self.cfg.get("feed_mm", 15), density)
+        try:
+            self.printer.print_images(images, self.cfg.get("feed_mm", 15), density, notify=self._heat_event)
+        finally:
+            self.cooling = False
+
+    def _heat_event(self, kind):
+        """Hitzeschutz des Druckers: "cooling" (wartet vor dem Druck), "paused_hot", "cooled"."""
+        if kind in ("cooling", "paused_hot"):
+            self.cooling = True
+            self.emit("hot", waiting=kind == "cooling")
+        elif kind == "cooled":
+            self.cooling = False
+            self.emit("cooled")
 
     def _tone(self, page, mode, from_network):
         """Tonwerte von Fotos anpassen (nur Fotos – Text und Grafik bleiben unverändert).
@@ -420,6 +433,8 @@ def printer_attributes(service, host):
     if service.last_error and time.time() - service.last_error[0] < 120:
         reasons = ["offline-report"]
         message = service.last_error[1][:200]
+    elif service.cooling:
+        message = "Drucker zu heiß – kühlt ab, druckt dann weiter"
     elif busy:
         message = "Druckt"
     name = cfg.get("printer_name", "Cat Printer")

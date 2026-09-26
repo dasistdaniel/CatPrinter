@@ -9,6 +9,7 @@ import tempfile
 import threading
 import time
 import unittest
+import unittest.mock
 
 from PIL import Image, ImageChops
 
@@ -125,6 +126,100 @@ class PrinterJobTest(unittest.TestCase):
         self.assertLess(prepare(img).height, 120)
 
 
+class FakeSerial:
+    """Simulierter Drucker-Port: DLE EOT 3 meldet 'heiß', bis hot_replies aufgebraucht sind."""
+
+    def __init__(self, hot_replies=0, stall_after=None, stall_seconds=0):
+        self.hot_replies = hot_replies
+        self.stall_after = stall_after
+        self.stall_seconds = stall_seconds
+        self.buffer = b""
+        self.written = 0
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+    @property
+    def in_waiting(self):
+        return len(self.buffer)
+
+    def read(self, n):
+        data, self.buffer = self.buffer[:n], self.buffer[n:]
+        return data
+
+    def reset_input_buffer(self):
+        self.buffer = b""
+
+    def flush(self):
+        pass
+
+    def write(self, data):
+        if data == b"\x10\x04\x03":
+            hot = self.hot_replies > 0
+            self.hot_replies -= 1
+            self.buffer += b"\x52" if hot else b"\x12"
+        elif data == b"\x1e\x47\x03":
+            self.buffer += b"HV=H1.0,SV=V1.01,VOLT=7500mv,DPI=384,\x00"
+        else:
+            self.written += len(data)
+            if self.stall_after is not None and self.written > self.stall_after:
+                time.sleep(self.stall_seconds)
+                self.stall_after = None
+
+
+class HeatTest(unittest.TestCase):
+    def make_printer(self, fake):
+        from catprinter import printer as pr
+        p = pr.Printer("COM99")
+        p._open = lambda: fake
+        p.chunk_delay = 0
+        self.addCleanup(setattr, pr, "COOL_POLL", pr.COOL_POLL)
+        self.addCleanup(setattr, pr, "STALL_SECONDS", pr.STALL_SECONDS)
+        pr.COOL_POLL, pr.STALL_SECONDS = 0.01, 0.2
+        return p
+
+    def run_job(self, p):
+        from catprinter import printer as pr
+        events = []
+        real_sleep = time.sleep  # lange Wartezeiten (z. B. 2 s Nachlauf) im Test überspringen
+        with unittest.mock.patch.object(pr.time, "sleep", lambda s: None if s >= 1 else real_sleep(s)):
+            p.print_images([Image.new("1", (WIDTH, 40), 0)], feed_mm=1, notify=events.append)
+        return events
+
+    def test_waits_until_cool_before_printing(self):
+        fake = FakeSerial(hot_replies=3)
+        events = self.run_job(self.make_printer(fake))
+        self.assertEqual(events, ["cooling", "cooled"])
+        self.assertGreater(fake.written, 0)
+
+    def test_cold_printer_prints_directly(self):
+        p = self.make_printer(FakeSerial())
+        self.assertEqual(self.run_job(p), [])
+        self.assertFalse(p.last_hot)
+        self.assertEqual(p.last_status["VOLT"], "7500mv")
+
+    def test_pause_in_the_middle_is_reported(self):
+        events = self.run_job(self.make_printer(FakeSerial(stall_after=1000, stall_seconds=0.4)))
+        self.assertEqual(events, ["paused_hot"])
+
+    def test_service_shows_cooling(self):
+        svc = server.PrintService(dict(server.DEFAULT_CONFIG, uuid="x"))
+        self.addCleanup(svc.stop)
+        svc.printer = FakePrinter(heat=True)
+        events = []
+        svc.listeners.append(lambda e, **d: events.append(e))
+        svc.print_image("Test", Image.new("L", (WIDTH, 50), 0))
+        for _ in range(100):
+            if "job_done" in events:
+                break
+            time.sleep(0.02)
+        self.assertEqual([e for e in events if e in ("hot", "cooled", "job_done")], ["hot", "cooled", "job_done"])
+        self.assertFalse(svc.cooling)
+
+
 class NetshareTest(unittest.TestCase):
     def test_address_rules(self):
         from catprinter import netshare
@@ -211,13 +306,19 @@ class HistoryTest(unittest.TestCase):
 
 
 class FakePrinter:
-    def __init__(self, fail=False):
+    def __init__(self, fail=False, heat=False):
         self.printed = []
         self.port = "FAKE"
         self.fail = fail
+        self.heat = heat
+        self.seen_cooling = False
         self.last_status = {"VOLT": "7100mv"}
 
-    def print_images(self, images, feed_mm=15, density=25):
+    def print_images(self, images, feed_mm=15, density=25, notify=None):
+        if self.heat and notify:
+            notify("cooling")
+            self.seen_cooling = True
+            notify("cooled")
         if self.fail:
             from catprinter.printer import PrinterError
             raise PrinterError("COM99 lässt sich nicht öffnen")
@@ -422,7 +523,7 @@ class ServerTest(unittest.TestCase):
 
     def test_calibrate_uses_own_density(self):
         printed = []
-        self.svc.printer.print_images = lambda images, feed, density: printed.append(density)
+        self.svc.printer.print_images = lambda images, feed, density, **_kw: printed.append(density)
         self.assertEqual(self.post_json("calibrate", {"density": 55})[0], 202)
         for _ in range(100):
             if printed:
