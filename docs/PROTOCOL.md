@@ -119,6 +119,34 @@ versions may behave differently.
 | `om_roll-40_48x40mm` … `om_roll-300_48x300mm` | 48 × 40/80/150/300 mm | Default: 48 × 80 mm, zero margins |
 | `iso_a6_105x148mm`, `iso_a4_210x297mm`, `na_letter_8.5x11in` | | Scaled down to 48 mm width |
 
+### Android (Default Print Service), via network sharing
+
+- Discovers the printer through the mDNS announcement (`_ipp._tcp`, TXT
+  `rp=ipp/print`, `pdl=image/pwg-raster,…`, `UUID=…`). Tested with a
+  Pixel 6a.
+- Sends a single `Print-Job` (not Create-Job/Send-Document) with
+  `print-quality=5` for photos from Google Photos, `sgray_8` at 203 dpi.
+- The photo was placed on an **A4 page** (1678 × 2373 px) filling it
+  (cropped to the page aspect ratio); the server scales it to 384 dots.
+- 203 dpi and the custom 48 mm media were accepted as offered.
+
+### Tone curve: Windows vs. phone
+
+The same photo printed once from Windows (GDI → IPP Class Driver) and once
+from Android arrives with different tones. Android keeps the original tones
+(within ~5 levels). Windows lifts photo shadows strongly and keeps mid-tones:
+
+| Original gray | 16 | 48 | 80 | 112 | 144 | 176 | 208 | 240 |
+|---|---|---|---|---|---|---|---|---|
+| via Windows | 69 | 71 | 84 | 111 | 137 | 178 | 215 | 241 |
+| via Android | 21 | 47 | 75 | 107 | 135 | 168 | 203 | 242 |
+
+Solid black in vector graphics (e.g. a logo) still arrives as 0 from
+Windows; the lift applies to photos. On thermal paper the lifted shadows look
+better (dark dithered areas run together), so the driver applies the Windows
+curve to **photos from the network** (`match_windows_tone`) to make phone
+prints match PC prints.
+
 ## 4. Converting gray to dots
 
 `printer.prepare()` scales each page to 384 dots width and converts it to
@@ -135,6 +163,11 @@ versions may behave differently.
 
 Measured on real jobs: a photo had ~190 frequent gray levels, a logo 11 and
 a text page 4.
+
+Before dithering, photos (mode `photo`, or `auto` detected as photo) can get
+two tone adjustments: the Windows curve above for jobs from the network, and
+`photo_brightness` as a gamma curve (`gamma = 1 − percent/100`, black and
+white stay fixed). Text and graphics pages are never adjusted.
 
 ## 5. PWG raster decoding
 

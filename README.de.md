@@ -151,6 +151,39 @@ Drucker aus) und wenn der Akku unter 6,8 V fällt.
 - Standardmäßig wird um 180° gedreht, damit der Ausdruck vom „Gesicht“ des
   Druckers aus richtig herum steht (das Seitenende kommt zuerst heraus).
 
+## Drucken vom Handy (optional, standardmäßig aus)
+
+In den Einstellungen auf der Statusseite **„Im Heimnetz freigeben“**
+einschalten. Der PC gibt den Drucker dann im WLAN als **„Cat Printer @
+<PC-Name>“** bekannt (mDNS/Bonjour, wie ein Netzwerkdrucker), und Handys
+können ohne zusätzliche App darauf drucken:
+
+- **Android:** *Einstellungen → Verbundene Geräte → Verbindungseinstellungen →
+  Drucken → Standard-Druckdienst* muss an sein. Dann aus einer beliebigen App
+  drucken (z. B. Google Fotos: ⋮ → Drucken), *Alle Drucker* wählen und
+  „Cat Printer @ …“ auswählen. Eines der 48-mm-Papierformate einstellen.
+- iOS/AirPrint ist nicht getestet.
+
+Hinweise:
+
+- Beim ersten Einschalten fragt Windows nach Adminrechten für zwei
+  Firewall-Regeln (TCP 631, UDP 5353) – **nur für private Netzwerke**. Ist das
+  Netzwerk als *öffentlich* eingestuft, erreichen Handys den PC nicht; die
+  Statusseite warnt dann.
+- Aus dem Netz ist **nur Drucken** möglich, und nur von privaten Adressen.
+  Statusseite, Einstellungen und Verlauf bleiben auf diesem PC. Solange die
+  Freigabe an ist, kann jeder im Heimnetz drucken.
+- Der PC muss laufen und Cat Printer gestartet sein.
+- Windows 11 richtet den bekannt gegebenen Drucker eventuell automatisch als
+  zweiten Netzwerkdrucker ein. Der kann gelöscht werden – „Cat Printer“ ist
+  derselbe Drucker.
+- **Fotos vom Handy** kommen originalgetreu an, Windows hellt dagegen beim
+  Drucken die Schatten von Fotos deutlich auf. Handy-Fotos würden also
+  dunkler gedruckt; *„Fotos vom Handy aufhellen wie am PC“* (standardmäßig an)
+  wendet dieselbe Tonwertkurve an. *„Foto-Helligkeit“* hellt zusätzlich die
+  Mitteltöne aller Fotos auf (Thermopunkte laufen etwas aus, Fotos wirken
+  daher oft dunkler als am Bildschirm). Text und Grafik werden nie verändert.
+
 ## Verlauf (optional, standardmäßig aus)
 
 Aus Datenschutzgründen werden gedruckte Seiten **nicht** gespeichert, solange
@@ -205,6 +238,9 @@ starten* wählen):
 | `rotate_180` | `true` | Ausdruck um 180° drehen |
 | `image_mode` | `"auto"` | Modus bei Druckqualität „Normal“: `auto`, `text` oder `photo` |
 | `keep_history` | `false` | Kopien gedruckter Seiten zum Ansehen/Nachdrucken aufbewahren (siehe *Verlauf*) |
+| `share_network` | `false` | Im Heimnetz freigeben, um vom Handy zu drucken (siehe *Drucken vom Handy*) |
+| `match_windows_tone` | `true` | Schatten von Handy-Fotos aufhellen wie Windows |
+| `photo_brightness` | `0` | Foto-Helligkeit in Prozent (−30 … +50), nur Fotos |
 | `http_host` / `http_port` | `127.0.0.1` / `631` | Adresse des IPP-Servers |
 | `printer_name` | `"Cat Printer"` | Name gegenüber Windows |
 | `uuid` | zufällig | Identität des Druckers – nicht ändern, sonst hält Windows ihn für ein neues Gerät |
@@ -217,9 +253,11 @@ starten* wählen):
 | Aufträge hängen dauerhaft | Server läuft nicht (kein Katzen-Symbol im Infobereich) – starten oder Autostart einrichten. |
 | `Add-Printer`: Zugriff verweigert | PowerShell als Administrator starten. |
 | Druck zu blass | Akku laden; `density` erhöhen (mit `calibrate` testen). |
+| Fotos zu dunkel | *„Foto-Helligkeit“* auf der Statusseite erhöhen (z. B. +20 %) und mit *„Nochmal drucken“* im Verlauf vergleichen. |
+| Handy findet den Drucker nicht | Freigabe an? Gleiches WLAN? Netzwerkprofil *Privat*? Firewall-Regel vorhanden (Statusseite zeigt Warnungen)? Unter Android muss der *Standard-Druckdienst* an sein. |
 | Dünne hellere Linien in großen, komplett schwarzen Flächen | Zeilen, in denen alle 384 Punkte schwarz sind, bekommen im Akkubetrieb etwas weniger Heizleistung. Solche Bilder mit angestecktem USB-Kabel (Laden) drucken – im Test waren die Linien dann weg. Text und normale Bilder sind nicht betroffen. |
 | „Unbekanntes USB-Gerät“ beim Anstecken | Normal: Der USB-Anschluss lädt nur, er hat keine Datenverbindung. Drucken geht nur über Bluetooth. |
-| Alles entfernen | exe: über *Einstellungen → Apps* deinstallieren. Python-Variante: `Remove-Printer "Cat Printer"` (als Admin), `.\autostart.ps1 -Remove`, Ordner `%APPDATA%\CatPrinterDriver` löschen. |
+| Alles entfernen | exe: über *Einstellungen → Apps* deinstallieren (entfernt auch die Firewall-Regeln). Python-Variante: `Remove-Printer "Cat Printer"` (als Admin), `.\autostart.ps1 -Remove`, Ordner `%APPDATA%\CatPrinterDriver` löschen. |
 
 ## exe bauen
 

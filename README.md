@@ -153,6 +153,38 @@ the battery drops below 6.8 V.
 - By default the output is rotated by 180° so it reads correctly when you look
   at the printer from its "face" side (the end of the page comes out first).
 
+## Printing from your phone (optional, off by default)
+
+Switch on **„Im Heimnetz freigeben“** (share on home network) in the settings on the status page. The
+PC then announces the printer in your Wi-Fi as **"Cat Printer @ <PC name>"**
+(mDNS/Bonjour, like a network printer), and phones can print to it without
+any extra app:
+
+- **Android:** make sure *Settings → Connected devices → Connection
+  preferences → Printing → Default Print Service* is on. Then print from any
+  app (e.g. Google Photos: ⋮ → Print), choose *All printers* and pick
+  "Cat Printer @ …". Select one of the 48 mm paper sizes.
+- iOS/AirPrint was not tested.
+
+Notes:
+
+- The first time you switch it on, Windows asks for admin rights to add two
+  firewall rules (TCP 631, UDP 5353) – **private networks only**. If your
+  network is set to *Public*, phones can't reach the PC; the status page warns
+  about that.
+- From the network **only printing** is possible, only from private
+  addresses. The status page, settings and history stay on this PC.
+  Anyone on your home network can print while sharing is on.
+- The PC must be running with Cat Printer started.
+- Windows 11 may automatically add the announced printer as a second,
+  network printer queue. You can delete it – "Cat Printer" is the same printer.
+- **Photos from phones** arrive with faithful tones, whereas Windows lightens
+  photo shadows noticeably when printing. So phone photos would print darker;
+  *„Fotos vom Handy aufhellen wie am PC“* (on by default) applies the same tone
+  curve. *„Foto-Helligkeit“* (photo brightness) additionally lightens the mid-tones of all photos
+  (thermal dots spread a little, so photos tend to look darker than on
+  screen). Text and graphics are never changed.
+
 ## History (optional, off by default)
 
 For privacy, printed pages are **not** stored unless you switch on
@@ -206,6 +238,9 @@ tray menu afterwards.
 | `rotate_180` | `true` | Rotate output 180° (readable from the printer's face side) |
 | `image_mode` | `"auto"` | Mode used for print quality "Normal": `auto`, `text` or `photo` |
 | `keep_history` | `false` | Keep copies of printed pages for viewing / printing again (see *History*) |
+| `share_network` | `false` | Share on the home network for printing from phones (see *Printing from your phone*) |
+| `match_windows_tone` | `true` | Lighten photo shadows of phone prints like Windows does |
+| `photo_brightness` | `0` | Photo brightness in percent (−30 … +50), photos only |
 | `http_host` / `http_port` | `127.0.0.1` / `631` | Address of the IPP server |
 | `printer_name` | `"Cat Printer"` | Name reported to Windows |
 | `uuid` | random | Printer identity – don't change it, or Windows sees a new device |
@@ -218,9 +253,11 @@ tray menu afterwards.
 | Jobs stay "printing" forever | The server isn't running (no cat icon in the notification area) – start it or set up the autostart. |
 | `Add-Printer`: access denied | Run PowerShell as Administrator. |
 | Output too light | Charge the battery; raise `density` (see `calibrate`). |
+| Photos too dark | Raise *„Foto-Helligkeit“* on the status page (try +20 %) and compare with *„Nochmal drucken“* (print again) in the history. |
+| Phone doesn't find the printer | Sharing on? Same Wi-Fi? Network profile *Private*? Firewall rule present (status page shows warnings)? On Android, the *Default Print Service* must be enabled. |
 | Thin lighter lines in large all-black areas | Rows where all 384 dots are black get slightly less heat on battery power. Print such images with the USB cable plugged in (charging) – in our test the lines disappeared. Text and normal images are not affected. |
 | "Unknown USB device" when plugged in | Normal: the USB port only charges the printer, it has no data connection. Printing works only via Bluetooth. |
-| Remove everything | exe: uninstall via *Settings → Apps*. Source version: `Remove-Printer "Cat Printer"` (as admin), `.\autostart.ps1 -Remove`, delete `%APPDATA%\CatPrinterDriver`. |
+| Remove everything | exe: uninstall via *Settings → Apps* (also removes the firewall rules). Source version: `Remove-Printer "Cat Printer"` (as admin), `.\autostart.ps1 -Remove`, delete `%APPDATA%\CatPrinterDriver`. |
 
 ## Building the exe
 
@@ -255,6 +292,7 @@ server with a fake printer.
 | `catprinter/statuspage.py` | Status page (HTML) and its JSON data |
 | `catprinter/history.py` | Optional history of printed jobs |
 | `catprinter/installer.py` | Install/update/uninstall of the exe |
+| `catprinter/netshare.py` | Home network sharing: access rules, mDNS announcement, firewall |
 | `packaging/`, `build.ps1` | exe entry point, icon generator, build script |
 | `catprinter/__main__.py` | Command line interface |
 | `autostart.ps1` | Startup-folder shortcut |
