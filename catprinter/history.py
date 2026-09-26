@@ -29,8 +29,11 @@ class History:
             raise KeyError(hid)  # schützt auch vor Pfadangaben wie ../
         return os.path.join(self.directory, hid, *parts)
 
-    def add(self, name, pages, quality=None):
-        """Speichert die Seiten (PIL-Bilder in Druckbreite). Gibt die Verlaufs-ID zurück."""
+    def add(self, name, pages, quality=None, network=False):
+        """Speichert die Seiten (PIL-Bilder in Druckbreite). Gibt die Verlaufs-ID zurück.
+
+        network: Auftrag kam vom Handy – beim Nachdruck gleiche Tonwertanpassung.
+        """
         hid = f"{int(time.time() * 1000):013d}-{uuid.uuid4().hex[:6]}"
         with self.lock:
             tmp = os.path.join(self.directory, hid + ".tmp")
@@ -38,7 +41,7 @@ class History:
             for i, page in enumerate(pages, 1):
                 page.convert("L").save(os.path.join(tmp, f"page-{i}.png"), optimize=True)
             meta = {"id": hid, "name": name, "created": int(time.time()), "pages": len(pages),
-                    "quality": quality, "state": "pending"}
+                    "quality": quality, "network": bool(network), "state": "pending"}
             with open(os.path.join(tmp, "meta.json"), "w", encoding="utf-8") as f:
                 json.dump(meta, f)
             os.replace(tmp, os.path.join(self.directory, hid))

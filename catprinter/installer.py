@@ -16,7 +16,7 @@ import time
 import urllib.request
 import winreg
 
-from . import __version__
+from . import __version__, netshare
 from .server import CONFIG_DIR, load_config
 
 log = logging.getLogger("installer")
@@ -212,8 +212,9 @@ def install(ask=True):
 
 
 def uninstall(ask=True):
-    if ask and _box("Cat Printer deinstallieren?\n\nDer Drucker „Cat Printer“ wird aus Windows entfernt "
-                    "(Windows fragt nach Adminrechten).", MB_YESNO | MB_ICONWARNING) != IDYES:
+    if ask and _box("Cat Printer deinstallieren?\n\nDer Drucker „Cat Printer“ (und ggf. die Firewall-Regeln der "
+                    "Netzwerkfreigabe) werden aus Windows entfernt – Windows fragt nach Adminrechten.",
+                    MB_YESNO | MB_ICONWARNING) != IDYES:
         return 1
     stop_running()
     for folder, name in (("Startup", STARTUP_LNK), ("Programs", STARTMENU_LNK)):
@@ -225,8 +226,14 @@ def uninstall(ask=True):
         winreg.DeleteKey(winreg.HKEY_CURRENT_USER, UNINSTALL_KEY)
     except FileNotFoundError:
         pass
+    # Drucker und Firewall-Regeln der Netzwerkfreigabe mit einer einzigen Adminabfrage entfernen
+    admin_steps = []
     if printer_exists():
-        _elevated(f"Remove-Printer -Name {_q(PRINTER_NAME)}")
+        admin_steps.append(f"Remove-Printer -Name {_q(PRINTER_NAME)}")
+    if netshare.firewall_any():
+        admin_steps.append(netshare.firewall_script(remove=True))
+    if admin_steps:
+        _elevated("; ".join(admin_steps))
 
     if ask and os.path.isdir(CONFIG_DIR) and _box(
             "Auch Einstellungen, Log und Verlauf löschen?\n" + CONFIG_DIR, MB_YESNO | MB_ICONQUESTION) == IDYES:

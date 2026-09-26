@@ -4,6 +4,7 @@ import io
 import json
 import os
 import random
+import socket
 import tempfile
 import threading
 import time
@@ -124,6 +125,74 @@ class PrinterJobTest(unittest.TestCase):
         self.assertLess(prepare(img).height, 120)
 
 
+class NetshareTest(unittest.TestCase):
+    def test_address_rules(self):
+        from catprinter import netshare
+        for ip in ("192.168.178.20", "10.0.0.5", "172.16.1.1", "fe80::1", "::ffff:192.168.1.2"):
+            self.assertTrue(netshare.is_lan(ip), ip)
+        for ip in ("8.8.8.8", "127.0.0.1", "::1", "unsinn"):
+            self.assertFalse(netshare.is_lan(ip), ip)
+        me = socket.gethostname()
+        for host in ("192.168.178.147:631", f"{me}:631", f"{me.lower()}.local:631", "[fe80::1]:631"):
+            self.assertTrue(netshare.lan_host_ok(host), host)
+        for host in ("evil.example:631", "evil.example", "printer.attacker.com:631"):
+            self.assertFalse(netshare.lan_host_ok(host), host)
+
+
+class NetworkAccessTest(unittest.TestCase):
+    """Server mit Netzwerkfreigabe, angesprochen über die echte LAN-Adresse dieses PCs."""
+
+    def setUp(self):
+        from catprinter import netshare
+        addrs = netshare.lan_addresses()
+        if not addrs:
+            self.skipTest("keine Heimnetz-Adresse")
+        self.lan_ip = addrs[0]
+        cfg = dict(server.DEFAULT_CONFIG, http_port=0, uuid="x", share_network=True)
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.httpd, self.svc = server.serve(cfg, config_file=os.path.join(tmp.name, "config.json"))
+        self.port = self.httpd.server_address[1]
+        threading.Thread(target=self.httpd.serve_forever, daemon=True).start()
+        self.addCleanup(self.httpd.server_close)
+        self.addCleanup(self.httpd.shutdown)
+
+    def request(self, method, path, body=None, host=None, ctype=None):
+        conn = http.client.HTTPConnection(self.lan_ip, self.port, timeout=10)
+        headers = {"Host": host or f"{self.lan_ip}:{self.port}"}
+        if ctype:
+            headers["Content-Type"] = ctype
+        conn.request(method, path, body=body, headers=headers)
+        resp = conn.getresponse()
+        data = resp.read()
+        conn.close()
+        return resp.status, data
+
+    def ipp_attrs(self, host=None):
+        msg = ipp.Message((2, 0), ipp.GET_PRINTER_ATTRIBUTES, 1, [(ipp.OPERATION, [
+            ("attributes-charset", ipp.CHARSET, ["utf-8"]),
+            ("attributes-natural-language", ipp.LANGUAGE, ["en"]),
+            ("printer-uri", ipp.URI, [f"ipp://{self.lan_ip}:{self.port}/ipp/print"])])])
+        return self.request("POST", "/ipp/print", ipp.encode(msg), host, "application/ipp")
+
+    def test_lan_can_print_but_not_see_status(self):
+        status, body = self.ipp_attrs()
+        self.assertEqual(status, 200)
+        resp, _ = ipp.decode(body)
+        self.assertIn(self.lan_ip, resp.get("printer-uri-supported"))
+        self.assertEqual(self.request("GET", "/")[0], 403)
+        self.assertEqual(self.request("GET", "/status.json")[0], 403)
+        self.assertEqual(self.request("GET", "/history.json")[0], 403)
+        self.assertEqual(self.request("POST", "/action/test", b"{}", ctype="application/json")[0], 403)
+
+    def test_lan_rebinding_host_rejected(self):
+        self.assertEqual(self.ipp_attrs(host=f"evil.example:{self.port}")[0], 403)
+
+    def test_share_off_blocks_lan(self):
+        self.svc.cfg["share_network"] = False
+        self.assertEqual(self.ipp_attrs()[0], 403)
+
+
 class HistoryTest(unittest.TestCase):
     def test_limit_and_ids(self):
         from catprinter.history import History
@@ -195,6 +264,28 @@ class ServiceTest(unittest.TestCase):
         svc, events = self.make_service()
         svc.refresh_status()
         self.assertEqual(self.wait_for(events, "status")["status"], {"VOLT": "7100mv"})
+
+    def test_windows_tone_only_for_network_photos(self):
+        from catprinter.printer import _WINDOWS_LUT
+        self.assertEqual((_WINDOWS_LUT[0], _WINDOWS_LUT[255]), (66, 255))
+        self.assertEqual(_WINDOWS_LUT, sorted(_WINDOWS_LUT))  # monoton, keine Tonwertumkehr
+        svc, _events = self.make_service()
+        photo = Image.linear_gradient("L").resize((WIDTH, 300))   # viele Grautöne = Foto
+        graphic = Image.new("L", (WIDTH, 300), 255)
+        graphic.paste(0, (0, 0, WIDTH, 100))                      # Logo mit Schwarzfläche
+        self.assertIs(svc._tone(photo, "photo", False), photo)    # vom PC: unverändert
+        self.assertEqual(svc._tone(photo, "auto", True).getpixel((0, 0)), 66)  # Handy-Foto: aufgehellt
+        self.assertIs(svc._tone(graphic, "auto", True), graphic)  # Handy-Grafik: bleibt schwarz
+        svc.cfg["match_windows_tone"] = False
+        self.assertIs(svc._tone(photo, "photo", True), photo)
+        # Foto-Helligkeit: Mitteltöne heller, Schwarz/Weiß bleiben, Grafik unverändert
+        svc.cfg["photo_brightness"] = 20
+        bright = svc._tone(photo, "photo", False)
+        self.assertGreater(bright.getpixel((0, 150)), photo.getpixel((0, 150)))
+        self.assertEqual((bright.getpixel((0, 0)), bright.getpixel((0, 299))), (0, 255))
+        self.assertIs(svc._tone(graphic, "auto", False), graphic)
+        with self.assertRaises(ValueError):
+            server.validate_settings({"photo_brightness": 99})
 
     def test_battery_volts(self):
         from catprinter.printer import battery_volts

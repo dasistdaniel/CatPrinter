@@ -13,10 +13,11 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from PIL import Image
 
-from . import ipp, pwg, statuspage
+from . import ipp, netshare, pwg, statuspage
 from .pages import calibration_page, short_test_page
 from .history import History
-from .printer import DEFAULT_DENSITY, DPI, MODES, Printer, PrinterError, prepare, scale_to_width
+from .printer import (DEFAULT_DENSITY, DPI, MODES, Printer, PrinterError, is_photo_page, photo_brightness,
+                      prepare, scale_to_width, windows_tone)
 
 log = logging.getLogger("server")
 
@@ -36,6 +37,9 @@ DEFAULT_CONFIG = {
     "rotate_180": True,        # Ausdruck aus Sicht des Drucker-Gesichts lesbar
     "image_mode": "auto",      # Modus bei Druckqualität "Normal": auto, text oder photo
     "keep_history": False,     # Kopien gedruckter Seiten aufbewahren (Datenschutz: standardmäßig aus)
+    "share_network": False,    # im Heimnetz freigeben (Drucken vom Handy), standardmäßig aus
+    "match_windows_tone": True,  # Fotos vom Handy wie Windows aufhellen (gleiches Ergebnis wie vom PC)
+    "photo_brightness": 0,     # Foto-Helligkeit in Prozent (-30 … +50), nur Fotos
     "printer_name": "Cat Printer",
 }
 
@@ -70,10 +74,13 @@ def validate_settings(changes):
         elif key == "feed_mm":
             if isinstance(value, bool) or not isinstance(value, int) or not 0 <= value <= 50:
                 raise ValueError("Vorschub muss eine ganze Zahl von 0 bis 50 mm sein")
+        elif key == "photo_brightness":
+            if isinstance(value, bool) or not isinstance(value, int) or not -30 <= value <= 50:
+                raise ValueError("Foto-Helligkeit muss eine ganze Zahl von -30 bis 50 sein")
         elif key == "image_mode":
             if value not in MODES:
                 raise ValueError("Unbekannter Bildmodus")
-        elif key in ("rotate_180", "trim_bottom", "keep_history"):
+        elif key in ("rotate_180", "trim_bottom", "keep_history", "share_network", "match_windows_tone"):
             if not isinstance(value, bool):
                 raise ValueError(f"{key} muss true oder false sein")
         elif key == "com_port":
@@ -150,6 +157,7 @@ class Job:
         self.quality = None  # IPP print-quality: 3 = Entwurf, 4 = Normal, 5 = Hoch
         self.density = None  # abweichende Druckdichte (Probedruck), sonst aus der Konfiguration
         self.images = None   # fertige Seitenbilder statt Dokumentdaten (Nachdruck aus dem Verlauf)
+        self.from_network = False  # kam vom Handy/aus dem Heimnetz (nicht über Windows)
         self.internal = False  # Test-/Probe-/Nachdruck: nicht im Verlauf speichern
         self.history_id = None
 
@@ -171,6 +179,7 @@ class PrintService:
         self.active = False   # gerade am Drucken?
         self.checking = False # Akkuabfrage läuft?
         self.printed = 0      # erfolgreich gedruckte Aufträge seit dem Start
+        self.net_status = {}  # Netzwerkfreigabe: Adressen, Firewall, Netzwerkprofil (setzt das Tray)
         self.history = History(os.path.join(os.path.dirname(self.config_file), "history"))
         self._stopped = False
         threading.Thread(target=self._worker, daemon=True).start()
@@ -216,6 +225,7 @@ class PrintService:
         meta = self.history.meta(hid)
         job = self.new_job(f"{meta['name']} (erneut)", "CatPrinterDriver", 1)
         job.quality = meta.get("quality")
+        job.from_network = meta.get("network", False)  # Handy-Fotos auch beim Nachdruck aufhellen
         job.internal = True
         self.submit(job, images=self.history.pages(hid))
         return job
@@ -223,6 +233,7 @@ class PrintService:
     def update_settings(self, changes):
         """Übernimmt geprüfte Einstellungen sofort und speichert sie in config.json."""
         clean = validate_settings(changes)
+        share_changed = "share_network" in clean and clean["share_network"] != bool(self.cfg.get("share_network"))
         if clean.get("keep_history") is False and self.cfg.get("keep_history"):
             self.history.clear()  # Datenschutz: ausschalten = alles Gespeicherte löschen
             log.info("Verlauf ausgeschaltet und gelöscht")
@@ -234,6 +245,10 @@ class PrintService:
         save_config(self.cfg, self.config_file)
         log.info("Einstellungen geändert: %s", clean)
         self.emit("settings", changes=clean)
+        if share_changed:
+            # Braucht einen Server-Neustart (andere Adresse) – erst nach der HTTP-Antwort
+            threading.Timer(0.5, self.emit, args=("share_changed",),
+                            kwargs={"enabled": clean["share_network"]}).start()
         return clean
 
     def stop(self):
@@ -304,12 +319,15 @@ class PrintService:
         pages = job.images or self._decode(job)
         if self.cfg.get("keep_history") and not job.internal:
             try:
-                job.history_id = self.history.add(job.name, [scale_to_width(p) for p in pages], job.quality)
+                job.history_id = self.history.add(job.name, [scale_to_width(p) for p in pages], job.quality,
+                                                  network=job.from_network)
             except OSError:
                 log.exception("Auftrag konnte nicht im Verlauf gespeichert werden")
         rotate = self.cfg.get("rotate_180", True)
         mode = image_mode(job.quality, self.cfg.get("image_mode", "auto"))
-        log.info("  Bildmodus: %s (Druckqualität %s)", mode, job.quality)
+        log.info("  Bildmodus: %s (Druckqualität %s)%s", mode, job.quality,
+                 ", vom Netzwerk" if job.from_network else "")
+        pages = [self._tone(p, mode, job.from_network) for p in pages]
         images = [prepare(p, self.cfg.get("trim_bottom", True), rotate, mode) for p in pages]
         if rotate:
             # Gedreht kommt das Seitenende zuerst – bei mehreren Seiten also
@@ -319,6 +337,25 @@ class PrintService:
         job.pages = len(images)
         density = job.density or self.cfg.get("density", DEFAULT_DENSITY)
         self.printer.print_images(images, self.cfg.get("feed_mm", 15), density)
+
+    def _tone(self, page, mode, from_network):
+        """Tonwerte von Fotos anpassen (nur Fotos – Text und Grafik bleiben unverändert).
+
+        - Fotos vom Handy wie Windows aufhellen, damit sie gleich aussehen wie vom PC
+        - Foto-Helligkeit aus den Einstellungen (Thermopunkte laufen etwas aus)
+        """
+        match = from_network and self.cfg.get("match_windows_tone", True)
+        brightness = self.cfg.get("photo_brightness", 0)
+        if not match and not brightness:
+            return page
+        if not (mode == "photo" or (mode == "auto" and is_photo_page(page))):
+            return page
+        if match:
+            log.info("  Foto vom Netzwerk: Tonwerte wie unter Windows angepasst")
+            page = windows_tone(page)
+        if brightness:
+            page = photo_brightness(page, brightness)
+        return page
 
     def _decode(self, job):
         data = job.data
@@ -347,6 +384,7 @@ class PrintService:
             img.thumbnail((128, 256))
         else:
             mode = image_mode(meta.get("quality"), self.cfg.get("image_mode", "auto"))
+            page = self._tone(page, mode, meta.get("network", False))
             img = prepare(page, self.cfg.get("trim_bottom", True), False, mode)
         buf = io.BytesIO()
         img.save(buf, "PNG")
@@ -539,18 +577,34 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
-    def _host_ok(self):
-        """Schutz vor DNS-Rebinding: nur Anfragen an 127.0.0.1/localhost beantworten.
+    def _host_ok(self, ipp_request=False):
+        """Wer darf was?
 
-        Sonst könnte eine fremde Webseite, deren Domain auf 127.0.0.1 zeigt, als
-        "gleiche Herkunft" Statusdaten und den Verlauf auslesen oder drucken.
+        - Vom PC selbst (Loopback): alles, aber nur mit Host 127.0.0.1/localhost –
+          Schutz vor DNS-Rebinding (fremde Domain, die auf 127.0.0.1 zeigt).
+        - Aus dem Heimnetz (nur mit Netzwerkfreigabe): ausschließlich IPP-Drucken,
+          Host muss eine IP oder der Name dieses PCs sein. Statusseite, Einstellungen
+          und Verlauf bleiben lokal.
         """
-        port = self.server.server_address[1]
+        client = self.client_address[0]
         host = (self.headers.get("Host") or "").lower()
-        if host in (f"127.0.0.1:{port}", f"localhost:{port}", f"[::1]:{port}"):
+        if netshare.is_loopback(client):
+            port = self.server.server_address[1]
+            if host in (f"127.0.0.1:{port}", f"localhost:{port}", f"[::1]:{port}"):
+                return True
+            reason = f"fremder Host-Header {host!r}"
+        elif not self.service.cfg.get("share_network"):
+            reason = f"Netzwerkzugriff von {client} (Freigabe aus)"
+        elif not netshare.is_lan(client):
+            reason = f"Adresse {client} ist nicht im Heimnetz"
+        elif not ipp_request:
+            reason = f"{client} darf nur drucken"
+        elif not netshare.lan_host_ok(host):
+            reason = f"fremder Host-Header {host!r} von {client}"
+        else:
             return True
-        log.warning("Anfrage mit fremdem Host-Header abgelehnt: %r", host)
-        self._send(403, "text/plain", b"forbidden host")
+        log.warning("Anfrage abgelehnt: %s", reason)
+        self._send(403, "text/plain", b"forbidden")
         return False
 
     def do_GET(self):
@@ -646,7 +700,9 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         body = self._read_body()
-        if not self._host_ok():
+        is_ipp = (not self.path.startswith("/action/")
+                  and self.headers.get("Content-Type", "").split(";")[0].strip() == "application/ipp")
+        if not self._host_ok(ipp_request=is_ipp):
             return
         if self.path.startswith("/action/"):
             self._action(self.path[len("/action/"):], body)
@@ -702,6 +758,7 @@ class Handler(BaseHTTPRequestHandler):
                               req.get("requesting-user-name", ipp.OPERATION) or "Windows",
                               req.get("copies", ipp.JOB) or 1)
             job.quality = req.get("print-quality", ipp.JOB)
+            job.from_network = not netshare.is_loopback(self.client_address[0])
             if op == ipp.PRINT_JOB:
                 svc.submit(job, doc)
             resp = self._response(req, ipp.OK)
@@ -782,7 +839,10 @@ def serve(cfg, save_jobs_dir=None, config_file=None):
     handler = type("BoundHandler", (Handler,), {"service": service})
     # Kein SO_REUSEADDR: unter Windows könnte sonst eine zweite Instanz denselben Port belegen
     server_cls = type("SingleServer", (ThreadingHTTPServer,), {"allow_reuse_address": False})
-    httpd = server_cls((cfg["http_host"], cfg["http_port"]), handler)
+    # Mit Netzwerkfreigabe auf allen Adressen hören; der Handler lässt aus dem Netz nur IPP zu
+    bind = "0.0.0.0" if cfg.get("share_network") else cfg["http_host"]
+    httpd = server_cls((bind, cfg["http_port"]), handler)
     httpd.daemon_threads = True
-    log.info("IPP-Drucker läuft: ipp://%s:%d/ipp/print", cfg["http_host"], cfg["http_port"])
+    log.info("IPP-Drucker läuft: ipp://%s:%d/ipp/print%s", cfg["http_host"], cfg["http_port"],
+             " (im Heimnetz freigegeben)" if cfg.get("share_network") else "")
     return httpd, service

@@ -3,6 +3,7 @@ import ctypes
 import json
 import logging
 import os
+import socket
 import subprocess
 import threading
 import urllib.request
@@ -11,6 +12,7 @@ import webbrowser
 import pystray
 from PIL import Image, ImageDraw
 
+from . import netshare
 from .pages import short_test_page
 from .printer import battery_volts
 from .server import CONFIG_DIR, CONFIG_FILE, load_config, save_config, serve
@@ -53,6 +55,7 @@ class TrayApp:
         self.volts = None
         self.low_battery_warned = False
         self.httpd = self.service = None
+        self.advertiser = None
         self.icon = pystray.Icon("CatPrinter", make_icon("ready"), "Cat Printer", self._menu())
 
     # ------------------------------------------------------------ Server
@@ -62,15 +65,36 @@ class TrayApp:
         self.httpd, self.service = serve(self.cfg, self.save_jobs_dir)
         self.service.listeners.append(self.on_event)
         threading.Thread(target=self.httpd.serve_forever, daemon=True).start()
+        if self.cfg.get("share_network"):
+            threading.Thread(target=self._start_sharing, args=(self.service,), daemon=True).start()
+
+    def _start_sharing(self, service):
+        """mDNS-Bekanntgabe starten und Netzwerkstatus für die Statusseite ermitteln."""
+        status = {"addresses": netshare.lan_addresses(),
+                  "name": f"{self.cfg.get('printer_name', 'Cat Printer')} @ {socket.gethostname()}"}
+        try:
+            self.advertiser = netshare.Advertiser(self.cfg, self.cfg["http_port"])
+            self.advertiser.start()
+            status["advertised"] = True
+        except Exception as e:  # noqa: BLE001 – Freigabe darf den Druckserver nicht verhindern
+            log.exception("mDNS-Bekanntgabe fehlgeschlagen")
+            status["advertised"] = False
+            status["error"] = str(e)
+        status["firewall"] = netshare.firewall_ok()
+        status["profiles"] = netshare.network_profiles()
+        service.net_status = status
 
     def stop_server(self):
+        if self.advertiser:
+            self.advertiser.stop()
+            self.advertiser = None
         if self.httpd:
             self.httpd.shutdown()
             self.httpd.server_close()
             self.service.stop()
             self.httpd = self.service = None
 
-    def restart(self):
+    def restart(self, message="Einstellungen neu geladen."):
         log.info("Server wird neu gestartet (Einstellungen neu laden)")
         self.stop_server()
         try:
@@ -80,13 +104,27 @@ class TrayApp:
             self.icon.notify("Server konnte nicht neu starten – Port belegt.", "Cat Printer")
             return
         self.set_state("ready", "")
-        self.icon.notify("Einstellungen neu geladen.", "Cat Printer")
+        self.icon.notify(message, "Cat Printer")
+
+    def _share_changed(self, enabled):
+        if enabled and not netshare.firewall_ok():
+            from .installer import _elevated
+            # Einmalig: Firewall für private Netzwerke öffnen (Windows fragt nach Adminrechten)
+            _elevated(netshare.firewall_script())
+            if not netshare.firewall_ok():
+                self.icon.notify("Firewall-Regel wurde nicht angelegt (Adminrechte abgelehnt?) – "
+                                 "Handys erreichen den Drucker dann nicht.", "Cat Printer")
+        name = self.cfg.get("printer_name", "Cat Printer")
+        self.restart(f"Im Heimnetz freigegeben – auf dem Handy als „{name} @ {socket.gethostname()}“ wählbar."
+                     if enabled else "Netzwerkfreigabe ausgeschaltet.")
 
     # ------------------------------------------------------------ Ereignisse
 
     def on_event(self, event, **data):
         if event == "quit":
             self._quit()
+        elif event == "share_changed":
+            threading.Thread(target=self._share_changed, args=(data["enabled"],), daemon=True).start()
         elif event == "job_started":
             self.set_state("printing", data["job"].name)
         elif event == "job_done":

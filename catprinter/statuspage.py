@@ -29,7 +29,12 @@ def status_dict(service):
             "com_port": cfg.get("com_port") or "",
             "bluetooth_name": cfg.get("bluetooth_name", "YHK-"),
             "keep_history": bool(cfg.get("keep_history", False)),
+            "share_network": bool(cfg.get("share_network", False)),
+            "match_windows_tone": bool(cfg.get("match_windows_tone", True)),
+            "photo_brightness": int(cfg.get("photo_brightness", 0)),
         },
+        "network": dict(service.net_status, enabled=bool(cfg.get("share_network", False)),
+                        port=cfg["http_port"]),
         "url": f"ipp://{cfg['http_host']}:{cfg['http_port']}/ipp/print",
         "uptime": service.uptime(),
         "printed": service.printed,
@@ -97,6 +102,12 @@ h1 { font-size: 24px; margin: 0; line-height: 1.2; }
 .value { font-size: 22px; font-weight: 600; margin-top: 4px; font-variant-numeric: tabular-nums; }
 .hint { color: var(--muted); font-size: 13px; }
 .low { color: var(--err); }
+.netinfo {
+  background: var(--busy-bg); color: var(--text); border-radius: 12px;
+  padding: 10px 16px; margin-bottom: 16px; font-size: 14px;
+}
+.netinfo strong { color: var(--busy); }
+.net-warn { color: var(--err); margin-top: 4px; }
 .actions { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 24px; }
 button {
   font: inherit; font-weight: 600; font-size: 14px; cursor: pointer;
@@ -245,6 +256,11 @@ footer { color: var(--muted); font-size: 12px; margin-top: 24px; text-align: cen
     </div>
   </div>
 
+  <div class="netinfo" id="netinfo" hidden>
+    <strong>Im Heimnetz freigegeben</strong> <span id="net-text"></span>
+    <div class="net-warn" id="net-warn" hidden></div>
+  </div>
+
   <div class="actions">
     <button class="primary" id="btn-test">Testseite drucken</button>
     <button id="btn-battery">Akku prüfen</button>
@@ -296,6 +312,16 @@ footer { color: var(--muted); font-size: 12px; margin-top: 24px; text-align: cen
       <p class="help">Gilt für Druckqualität „Normal“. „Entwurf“ druckt immer als Text, „Hoch“ immer als Foto.</p>
     </div>
     <div class="field">
+      <label for="f-bright">Foto-Helligkeit</label>
+      <div class="control">
+        <input type="range" id="f-bright" name="photo_brightness" min="-30" max="50" step="5">
+        <output id="bright-out">0</output>
+      </div>
+      <p class="help">Hellt die Mitteltöne von Fotos auf (Schwarz und Weiß bleiben). Auf Thermopapier laufen
+        die Punkte etwas aus, deshalb wirken Fotos oft dunkler als am Bildschirm. Text und Grafik sind nicht betroffen.
+        Mit „Nochmal drucken“ im Verlauf lässt sich der Wert gut vergleichen.</p>
+    </div>
+    <div class="field">
       <label for="f-feed">Vorschub nach dem Druck</label>
       <div class="control">
         <input type="number" id="f-feed" name="feed_mm" min="0" max="50" step="1"><span class="unit">mm</span>
@@ -311,6 +337,16 @@ footer { color: var(--muted); font-size: 12px; margin-top: 24px; text-align: cen
       <p class="help">Speichert eine Kopie jeder gedruckten Seite auf diesem PC
         (<code>%APPDATA%\CatPrinterDriver\history</code>, höchstens 30 Aufträge), damit du sie ansehen und
         nochmal drucken kannst. Standardmäßig aus. <strong>Beim Ausschalten wird der Verlauf gelöscht.</strong></p>
+    </div>
+    <div class="field">
+      <label class="check"><input type="checkbox" id="f-share" name="share_network"> Im Heimnetz freigeben (Drucken vom Handy)</label>
+      <p class="help">Macht den Drucker für Handys und andere Geräte im selben WLAN sichtbar (Android:
+        „Standard-Druckdienst“). Nur Drucken ist aus dem Netz erreichbar – Statusseite, Einstellungen und
+        Verlauf bleiben auf diesem PC. Beim ersten Einschalten fragt Windows nach Adminrechten für die Firewall.
+        Jeder im Heimnetz kann dann drucken.</p>
+      <label class="check" style="margin-top:10px"><input type="checkbox" id="f-tone" name="match_windows_tone"> Fotos vom Handy aufhellen wie am PC</label>
+      <p class="help">Windows hellt beim Drucken die Schatten von Fotos auf, Handys nicht – ohne Ausgleich
+        werden Handy-Fotos deutlich dunkler. Betrifft nur Fotos, nicht Text und Grafik.</p>
     </div>
     <details class="field">
       <summary>Verbindung</summary>
@@ -355,7 +391,12 @@ function fillForm(s) {
   $("f-port").value = s.com_port;
   $("f-btname").value = s.bluetooth_name;
   $("f-history").checked = s.keep_history;
+  $("f-share").checked = s.share_network;
+  $("f-tone").checked = s.match_windows_tone;
+  $("f-bright").value = s.photo_brightness;
+  $("bright-out").textContent = fmtPercent(s.photo_brightness);
 }
+function fmtPercent(v) { v = Number(v); return (v > 0 ? "+" : "") + v + " %"; }
 function readForm() {
   return {
     density: Number($("f-density").value),
@@ -366,6 +407,9 @@ function readForm() {
     com_port: $("f-port").value.trim(),
     bluetooth_name: $("f-btname").value.trim(),
     keep_history: $("f-history").checked,
+    share_network: $("f-share").checked,
+    match_windows_tone: $("f-tone").checked,
+    photo_brightness: Number($("f-bright").value),
   };
 }
 function changes() {
@@ -411,7 +455,29 @@ function el(tag, cls, text) {
   return e;
 }
 
+function renderNetwork(n) {
+  $("netinfo").hidden = !n.enabled;
+  if (!n.enabled) return;
+  if (!n.addresses) {
+    $("net-text").textContent = "– wird eingerichtet …";
+    $("net-warn").hidden = true;
+    return;
+  }
+  $("net-text").textContent = n.addresses.length
+    ? "· Handy im selben WLAN → Drucken → Drucker „" + (n.name || s_name) + "“ wählen · " + n.addresses.join(", ") + ":" + n.port
+    : "· keine Heimnetz-Adresse gefunden";
+  const warn = [];
+  if (n.firewall === false) warn.push("Firewall-Regel fehlt – im Einstellungsbereich die Freigabe aus- und wieder einschalten.");
+  if (n.profiles && Object.values(n.profiles).includes("Public"))
+    warn.push("Ein Netzwerk ist als „öffentlich“ eingestuft – dort erreichen Handys den Drucker nicht (Windows: Netzwerkprofil „Privat“).");
+  if (n.advertised === false) warn.push("Bekanntgabe im Netz fehlgeschlagen: " + (n.error || "unbekannt"));
+  $("net-warn").textContent = warn.join(" ");
+  $("net-warn").hidden = !warn.length;
+}
+let s_name = "Cat Printer";
+
 function render(s) {
+  s_name = s.name;
   $("name").textContent = s.name;
   document.title = s.name + " – " + STATE[s.state];
   const pill = $("pill");
@@ -433,6 +499,7 @@ function render(s) {
   $("uptime").textContent = "seit " + fmtUptime(s.uptime);
 
   $("url").textContent = s.url;
+  renderNetwork(s.network);
   saved = s.settings;
   if (!dirty) fillForm(saved);
 
@@ -586,6 +653,7 @@ $("btn-calibrate").onclick = (e) =>
 
 $("settings").addEventListener("input", (e) => {
   if (e.target.id === "f-density") $("density-out").textContent = e.target.value;
+  if (e.target.id === "f-bright") $("bright-out").textContent = fmtPercent(e.target.value);
   updateDirty();
 });
 $("btn-reset").onclick = () => { fillForm(saved); updateDirty(); setMsg(""); };

@@ -70,6 +70,41 @@ def scale_to_width(img):
     return gray.resize((WIDTH, h), Image.Resampling.LANCZOS)
 
 
+# Tonwertkurve, die Windows (IPP-Klassentreiber) bei Fotos anwendet – gemessen am selben
+# Foto einmal über Windows, einmal vom Android-Handy: Schatten werden deutlich aufgehellt,
+# Mitteltöne bleiben. Auf Thermopapier laufen dunkle Bereiche sonst zu.
+WINDOWS_PHOTO_CURVE = [(0, 66), (16, 69), (48, 71), (80, 84), (112, 111), (144, 137),
+                       (176, 178), (208, 215), (240, 241), (255, 255)]
+
+
+def _curve_lut(points):
+    lut = []
+    for v in range(256):
+        for (x0, y0), (x1, y1) in zip(points, points[1:]):
+            if x0 <= v <= x1:
+                lut.append(round(y0 + (y1 - y0) * (v - x0) / (x1 - x0)))
+                break
+    return lut
+
+
+_WINDOWS_LUT = _curve_lut(WINDOWS_PHOTO_CURVE)
+
+
+def windows_tone(img):
+    """Fotos von anderen Geräten so aufhellen, wie es Windows beim Drucken tut."""
+    return img.convert("L").point(_WINDOWS_LUT)
+
+
+def photo_brightness(img, percent):
+    """Helligkeit als Gammakurve: +20 hellt Mitteltöne auf, Schwarz und Weiß bleiben."""
+    gamma = max(0.3, 1 - percent / 100)
+    return img.convert("L").point([round(255 * (v / 255) ** gamma) for v in range(256)])
+
+
+def is_photo_page(img):
+    return _is_photo(scale_to_width(img))
+
+
 def _to_bw(gray, mode):
     threshold = gray.point(lambda v: 0 if v < THRESHOLD else 255)
     if mode == "text":
