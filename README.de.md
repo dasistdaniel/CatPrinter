@@ -106,6 +106,22 @@ Drucker aus) und wenn der Akku unter 6,8 V fällt.
 - Standardmäßig wird um 180° gedreht, damit der Ausdruck vom „Gesicht“ des
   Druckers aus richtig herum steht (das Seitenende kommt zuerst heraus).
 
+## Verlauf (optional, standardmäßig aus)
+
+Aus Datenschutzgründen werden gedruckte Seiten **nicht** gespeichert, solange
+du den *Verlauf* nicht in den Einstellungen auf der Statusseite einschaltest.
+Ist er an, wird von jeder gedruckten Seite eine Kopie (Graustufen in
+Druckbreite, nicht das Originaldokument) in `%APPDATA%\CatPrinterDriver\history`
+aufbewahrt – höchstens die letzten 30 Aufträge. Die Statusseite zeigt sie mit
+Vorschaubild; per Klick siehst du, wie sie gedruckt aussehen, und kannst sie
+*nochmal drucken* (auch fehlgeschlagene, z. B. weil der Drucker aus war).
+Einträge lassen sich einzeln oder alle auf einmal löschen. **Beim Ausschalten
+wird der gesamte Verlauf sofort gelöscht.**
+
+Statusseite und Verlauf werden nur für Anfragen an `127.0.0.1`/`localhost`
+ausgeliefert (Schutz vor DNS-Rebinding), Aktionen brauchen eine eigene
+Kennung – fremde Webseiten können also weder mitlesen noch drucken.
+
 ## Befehle
 
 | Befehl | Zweck |
@@ -143,6 +159,7 @@ starten* wählen):
 | `trim_bottom` | `true` | Weißraum am Seitenende abschneiden |
 | `rotate_180` | `true` | Ausdruck um 180° drehen |
 | `image_mode` | `"auto"` | Modus bei Druckqualität „Normal“: `auto`, `text` oder `photo` |
+| `keep_history` | `false` | Kopien gedruckter Seiten zum Ansehen/Nachdrucken aufbewahren (siehe *Verlauf*) |
 | `http_host` / `http_port` | `127.0.0.1` / `631` | Adresse des IPP-Servers |
 | `printer_name` | `"Cat Printer"` | Name gegenüber Windows |
 | `uuid` | zufällig | Identität des Druckers – nicht ändern, sonst hält Windows ihn für ein neues Gerät |

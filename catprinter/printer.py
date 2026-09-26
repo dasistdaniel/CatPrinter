@@ -53,18 +53,21 @@ def prepare(img, trim=True, rotate=False, mode="auto"):
     rotate=True dreht um 180°, damit der Ausdruck richtig herum steht, wenn
     man von der Gesichtsseite des Druckers auf das herauskommende Papier schaut.
     """
-    gray = img.convert("L")
-    if abs(gray.width - WIDTH) <= 8:
-        gray = _fit_width(gray)
-    else:
-        h = max(1, round(gray.height * WIDTH / gray.width))
-        gray = gray.resize((WIDTH, h), Image.Resampling.LANCZOS)
-    bw = _to_bw(gray, mode)
+    bw = _to_bw(scale_to_width(img), mode)
     if trim:
         bw = _trim_bottom(bw)
     # Erst beschneiden, dann drehen: der weggeschnittene Weißraum am Seitenende
     # würde sonst nach dem Drehen vorn ausgedruckt
     return bw.rotate(180) if rotate else bw
+
+
+def scale_to_width(img):
+    """Seitenbild -> Graustufen in Druckbreite (384 Punkte)."""
+    gray = img.convert("L")
+    if abs(gray.width - WIDTH) <= 8:
+        return _fit_width(gray)
+    h = max(1, round(gray.height * WIDTH / gray.width))
+    return gray.resize((WIDTH, h), Image.Resampling.LANCZOS)
 
 
 def _to_bw(gray, mode):

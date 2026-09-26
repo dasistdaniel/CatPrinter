@@ -111,6 +111,21 @@ the battery drops below 6.8 V.
 - By default the output is rotated by 180° so it reads correctly when you look
   at the printer from its "face" side (the end of the page comes out first).
 
+## History (optional, off by default)
+
+For privacy, printed pages are **not** stored unless you switch on
+*History* in the settings on the status page. When enabled, a copy of every
+printed page (grayscale at print width, not the original document) is kept in
+`%APPDATA%\CatPrinterDriver\history` – at most the last 30 jobs. The status
+page then lists them with thumbnails; click one to see how it prints, and use
+*Print again* (also for jobs that failed, e.g. because the printer was off).
+Entries can be deleted one by one or all at once. **Switching the history off
+deletes all stored pages immediately.**
+
+The status page and history are only served to requests addressed to
+`127.0.0.1`/`localhost` (protection against DNS rebinding), and actions
+require a custom header, so other websites can neither read them nor print.
+
 ## Command line
 
 | Command | Purpose |
@@ -148,6 +163,7 @@ tray menu afterwards.
 | `trim_bottom` | `true` | Cut blank space at the end of each page |
 | `rotate_180` | `true` | Rotate output 180° (readable from the printer's face side) |
 | `image_mode` | `"auto"` | Mode used for print quality "Normal": `auto`, `text` or `photo` |
+| `keep_history` | `false` | Keep copies of printed pages for viewing / printing again (see *History*) |
 | `http_host` / `http_port` | `127.0.0.1` / `631` | Address of the IPP server |
 | `printer_name` | `"Cat Printer"` | Name reported to Windows |
 | `uuid` | random | Printer identity – don't change it, or Windows sees a new device |
@@ -183,6 +199,7 @@ server with a fake printer.
 | `catprinter/tray.py` | Tray icon, menu and notifications |
 | `catprinter/pages.py` | Test and calibration pages |
 | `catprinter/statuspage.py` | Status page (HTML) and its JSON data |
+| `catprinter/history.py` | Optional history of printed jobs |
 | `catprinter/__main__.py` | Command line interface |
 | `autostart.ps1` | Startup-folder shortcut |
 | `docs/PROTOCOL.md` | What was learned about the printer and the Windows IPP client |

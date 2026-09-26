@@ -28,6 +28,7 @@ def status_dict(service):
             "feed_mm": cfg.get("feed_mm"),
             "com_port": cfg.get("com_port") or "",
             "bluetooth_name": cfg.get("bluetooth_name", "YHK-"),
+            "keep_history": bool(cfg.get("keep_history", False)),
         },
         "url": f"ipp://{cfg['http_host']}:{cfg['http_port']}/ipp/print",
         "uptime": service.uptime(),
@@ -120,6 +121,39 @@ h2 { font-size: 16px; margin: 0 0 12px; }
 .badge.failed { color: var(--err); background: var(--err-bg); }
 .badge.canceled { color: var(--muted); background: var(--neutral-bg); }
 .empty { color: var(--muted); padding: 24px 16px; text-align: center; }
+.section-head { display: flex; align-items: center; justify-content: space-between; margin: 24px 0 12px; }
+.section-head h2 { margin: 0; }
+button.small { padding: 4px 12px; font-size: 13px; }
+button.link { border: 0; background: none; color: var(--accent); padding: 4px 0; margin-top: 6px; }
+button.link:hover { text-decoration: underline; }
+button.icon { border: 0; background: none; font-size: 16px; padding: 4px 8px; color: var(--muted); }
+button.danger { color: var(--err); }
+.hist { display: flex; align-items: center; gap: 14px; padding: 12px 16px; border-top: 1px solid var(--line); }
+.hist:first-child { border-top: 0; }
+.thumb {
+  width: 56px; height: 72px; flex: none; padding: 0; overflow: hidden; cursor: zoom-in;
+  background: #fff; border: 1px solid var(--line); border-radius: 6px;
+}
+.thumb img { width: 100%; height: 100%; object-fit: cover; object-position: top; display: block; }
+.hist .name { flex: 1; min-width: 0; }
+.hist .buttons { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+dialog {
+  width: min(480px, calc(100vw - 32px)); max-height: calc(100vh - 48px); padding: 0;
+  border: 1px solid var(--line); border-radius: 14px; background: var(--card); color: var(--text);
+  box-shadow: 0 12px 48px rgba(0,0,0,.25);
+}
+dialog[open] { display: flex; flex-direction: column; }
+dialog::backdrop { background: rgba(0,0,0,.45); }
+.viewer-head, .viewer-foot { display: flex; align-items: center; gap: 12px; padding: 12px 16px; }
+.viewer-head { border-bottom: 1px solid var(--line); justify-content: space-between; }
+.viewer-foot { border-top: 1px solid var(--line); justify-content: space-between; }
+.viewer-head .title { font-weight: 600; }
+.viewer-head .meta, .viewer-foot .hint { color: var(--muted); font-size: 13px; }
+.viewer-pages { overflow: auto; padding: 16px; display: grid; gap: 12px; justify-items: center; background: var(--bg); }
+.viewer-pages img {
+  width: 100%; max-width: 384px; background: #fff; image-rendering: pixelated;
+  box-shadow: 0 1px 4px rgba(0,0,0,.15);
+}
 .section { margin-top: 24px; }
 .section > summary {
   display: flex; align-items: baseline; gap: 10px; list-style: none;
@@ -219,6 +253,27 @@ footer { color: var(--muted); font-size: 12px; margin-top: 24px; text-align: cen
   <h2>Druckaufträge</h2>
   <div class="card jobs" id="jobs"><div class="empty">Noch keine Aufträge</div></div>
 
+  <div class="section-head">
+    <h2>Verlauf</h2>
+    <button type="button" class="small" id="btn-clear" hidden>Alle löschen</button>
+  </div>
+  <div class="card" id="history">
+    <div class="empty">Der Verlauf ist ausgeschaltet – gedruckte Aufträge werden nicht gespeichert.<br>
+      <button type="button" class="link" id="btn-history-settings">In den Einstellungen einschalten</button></div>
+  </div>
+
+  <dialog id="viewer">
+    <div class="viewer-head">
+      <div><div class="title" id="viewer-title"></div><div class="meta" id="viewer-meta"></div></div>
+      <button type="button" class="icon" id="viewer-close" aria-label="Schließen">✕</button>
+    </div>
+    <div class="viewer-pages" id="viewer-pages"></div>
+    <div class="viewer-foot">
+      <span class="hint">Vorschau mit den aktuellen Einstellungen</span>
+      <button type="button" class="primary" id="viewer-reprint">Nochmal drucken</button>
+    </div>
+  </dialog>
+
   <details class="section" id="settings-section">
   <summary><h2>Einstellungen</h2><span class="summary-hint">Dichte, Bildmodus, Vorschub, Verbindung</span></summary>
   <form class="card settings" id="settings" autocomplete="off">
@@ -250,6 +305,12 @@ footer { color: var(--muted); font-size: 12px; margin-top: 24px; text-align: cen
     <div class="field checks">
       <label class="check"><input type="checkbox" id="f-rotate" name="rotate_180"> Um 180° drehen (vom Druckergesicht aus lesbar)</label>
       <label class="check"><input type="checkbox" id="f-trim" name="trim_bottom"> Weißraum am Seitenende abschneiden</label>
+    </div>
+    <div class="field">
+      <label class="check"><input type="checkbox" id="f-history" name="keep_history"> Verlauf: gedruckte Aufträge speichern</label>
+      <p class="help">Speichert eine Kopie jeder gedruckten Seite auf diesem PC
+        (<code>%APPDATA%\CatPrinterDriver\history</code>, höchstens 30 Aufträge), damit du sie ansehen und
+        nochmal drucken kannst. Standardmäßig aus. <strong>Beim Ausschalten wird der Verlauf gelöscht.</strong></p>
     </div>
     <details class="field">
       <summary>Verbindung</summary>
@@ -293,6 +354,7 @@ function fillForm(s) {
   $("f-trim").checked = s.trim_bottom;
   $("f-port").value = s.com_port;
   $("f-btname").value = s.bluetooth_name;
+  $("f-history").checked = s.keep_history;
 }
 function readForm() {
   return {
@@ -303,6 +365,7 @@ function readForm() {
     trim_bottom: $("f-trim").checked,
     com_port: $("f-port").value.trim(),
     bluetooth_name: $("f-btname").value.trim(),
+    keep_history: $("f-history").checked,
   };
 }
 function changes() {
@@ -389,7 +452,114 @@ function render(s) {
   $("btn-battery").disabled = s.checking;
 }
 
+let historyKey = "";   // zuletzt gezeichneter Verlauf (nur neu zeichnen, wenn er sich ändert)
+let historyEntries = [];
+let viewing = null;
+
+function pagesText(n) { return n + (n === 1 ? " Seite" : " Seiten"); }
+
+function renderHistory(h) {
+  const key = JSON.stringify(h);
+  if (key === historyKey) return;
+  historyKey = key;
+  historyEntries = h.entries;
+  const box = $("history");
+  $("btn-clear").hidden = !h.enabled || !h.entries.length;
+  box.replaceChildren();
+  if (!h.enabled) {
+    const empty = el("div", "empty", "Der Verlauf ist ausgeschaltet – gedruckte Aufträge werden nicht gespeichert.");
+    const link = el("button", "link", "In den Einstellungen einschalten");
+    link.type = "button";
+    link.onclick = openHistorySetting;
+    empty.append(document.createElement("br"), link);
+    box.append(empty);
+    return;
+  }
+  if (!h.entries.length) {
+    box.append(el("div", "empty", "Noch nichts gespeichert – der nächste Druck erscheint hier."));
+    return;
+  }
+  for (const e of h.entries) {
+    const row = el("div", "hist");
+    const thumb = el("button", "thumb");
+    thumb.type = "button";
+    thumb.title = "Ansehen";
+    const img = el("img");
+    img.alt = "Vorschau " + e.name;
+    img.loading = "lazy";
+    img.src = "history/" + e.id + "/1.png?thumb=1";
+    thumb.append(img);
+    thumb.onclick = () => openViewer(e);
+    const info = el("div", "name");
+    info.append(el("div", "title", e.name));
+    info.append(el("div", "meta", fmtTime(e.created) + " · " + pagesText(e.pages)));
+    const buttons = el("div", "buttons");
+    const again = el("button", "small", "Nochmal drucken");
+    again.type = "button";
+    again.onclick = () => reprint(e.id, again);
+    const del = el("button", "small danger", "Löschen");
+    del.type = "button";
+    del.onclick = () => removeEntry(e.id, del);
+    buttons.append(again, del);
+    const badgeState = e.state === "failed" ? "failed" : e.state === "done" ? "done" : "pending";
+    row.append(thumb, info, el("span", "badge " + badgeState, JOB[badgeState]), buttons);
+    box.append(row);
+  }
+}
+
+async function loadHistory() {
+  try {
+    const r = await fetch("history.json", { cache: "no-store" });
+    renderHistory(await r.json());
+  } catch { /* Server kurz weg – nächster Versuch beim nächsten Refresh */ }
+}
+
+function openViewer(e) {
+  viewing = e;
+  $("viewer-title").textContent = e.name;
+  $("viewer-meta").textContent = fmtTime(e.created) + " · " + pagesText(e.pages);
+  const pages = $("viewer-pages");
+  pages.replaceChildren();
+  for (let n = 1; n <= e.pages; n++) {
+    const img = el("img");
+    img.alt = "Seite " + n;
+    img.src = "history/" + e.id + "/" + n + ".png?t=" + Date.now();
+    pages.append(img);
+  }
+  $("viewer").showModal();
+}
+$("viewer-close").onclick = () => $("viewer").close();
+$("viewer").addEventListener("click", (ev) => { if (ev.target === $("viewer")) $("viewer").close(); });
+$("viewer-reprint").onclick = (ev) => { if (viewing) reprint(viewing.id, ev.currentTarget); };
+
+async function reprint(id, button) {
+  button.disabled = true;
+  try {
+    await post("reprint", { id });
+    if ($("viewer").open) $("viewer").close();
+  } catch (err) {
+    alert(err.message);
+  } finally {
+    setTimeout(() => { button.disabled = false; refresh(); }, 600);
+  }
+}
+async function removeEntry(id, button) {
+  button.disabled = true;
+  try { await post("history-delete", { id }); } finally { loadHistory(); }
+}
+$("btn-clear").onclick = async () => {
+  if (!confirm("Alle gespeicherten Aufträge löschen?")) return;
+  await post("history-clear");
+  loadHistory();
+};
+function openHistorySetting() {
+  $("settings-section").open = true;
+  $("f-history").focus();
+  $("f-history").scrollIntoView({ block: "center", behavior: "smooth" });
+}
+
 async function refresh() {
+  loadHistory();
   try {
     const r = await fetch("status.json", { cache: "no-store" });
     render(await r.json());
@@ -423,6 +593,8 @@ $("settings").onsubmit = async (e) => {
   e.preventDefault();
   const diff = changes();
   if (!Object.keys(diff).length) return;
+  if (diff.keep_history === false && historyEntries.length &&
+      !confirm("Verlauf ausschalten? Alle " + historyEntries.length + " gespeicherten Aufträge werden gelöscht.")) return;
   $("btn-save").disabled = true;
   try {
     await post("settings", diff);

@@ -1,5 +1,6 @@
 """Tests ohne Drucker: python -m unittest discover tests"""
 import http.client
+import io
 import json
 import os
 import random
@@ -121,6 +122,23 @@ class PrinterJobTest(unittest.TestCase):
         img = Image.new("L", (WIDTH, 1000), 255)
         img.paste(0, (0, 0, WIDTH, 100))
         self.assertLess(prepare(img).height, 120)
+
+
+class HistoryTest(unittest.TestCase):
+    def test_limit_and_ids(self):
+        from catprinter.history import History
+        with tempfile.TemporaryDirectory() as tmp:
+            h = History(tmp, limit=3)
+            ids = [h.add(f"Auftrag {i}", [Image.new("L", (WIDTH, 50), 200)], 4) for i in range(5)]
+            self.assertEqual([e["name"] for e in h.list()], ["Auftrag 4", "Auftrag 3", "Auftrag 2"])
+            self.assertEqual(h.pages(ids[-1])[0].size, (WIDTH, 50))
+            h.set_state(ids[-1], "done")
+            self.assertEqual(h.meta(ids[-1])["state"], "done")
+            for bad in ("../x", "..", "1234", ids[-1] + "/../.."):
+                with self.assertRaises(KeyError):
+                    h.meta(bad)
+            h.clear()
+            self.assertEqual(h.list(), [])
 
 
 class FakePrinter:
@@ -321,6 +339,59 @@ class ServerTest(unittest.TestCase):
             time.sleep(0.02)
         self.assertEqual(printed, [55])
         self.assertEqual(self.svc.cfg["density"], server.DEFAULT_CONFIG["density"])
+
+    def wait_until(self, cond):
+        for _ in range(150):
+            if cond():
+                return
+            time.sleep(0.02)
+        self.fail("Bedingung nicht erreicht")
+
+    def ipp_print(self, name="Einkaufsliste"):
+        doc = pwg.encode(noisy_image(384, 120))
+        resp = self.call(ipp.PRINT_JOB, [("job-name", ipp.NAME, [name]),
+                                         ("document-format", ipp.MIME, ["image/pwg-raster"])], doc=doc)
+        self.assertEqual(resp.code, ipp.OK)
+
+    def test_history_off_by_default(self):
+        self.ipp_print()
+        self.wait_until(lambda: self.svc.printer.printed)
+        data = json.loads(self.http("GET", "/history.json")[1])
+        self.assertEqual(data, {"enabled": False, "entries": []})
+        self.assertFalse(os.path.exists(self.svc.history.directory))
+
+    def test_history_view_reprint_and_disable(self):
+        self.post_json("settings", {"keep_history": True})
+        self.ipp_print("Einkaufsliste")
+        self.wait_until(lambda: self.svc.printer.printed)
+        entries = json.loads(self.http("GET", "/history.json")[1])["entries"]
+        self.assertEqual([(e["name"], e["pages"]) for e in entries], [("Einkaufsliste", 1)])
+        hid = entries[0]["id"]
+        self.wait_until(lambda: self.svc.history.meta(hid)["state"] == "done")
+
+        status, png = self.http("GET", f"/history/{hid}/1.png")
+        self.assertEqual(status, 200)
+        self.assertEqual(Image.open(io.BytesIO(png)).width, WIDTH)
+        self.assertEqual(self.http("GET", f"/history/{hid}/9.png")[0], 404)
+        self.assertEqual(self.http("GET", "/history/..%2F..%2Fconfig.json/1.png")[0], 404)
+
+        self.assertEqual(self.post_json("reprint", {"id": hid})[0], 202)
+        self.wait_until(lambda: len(self.svc.printer.printed) == 2)
+        # Nachdrucke landen nicht nochmal im Verlauf
+        self.assertEqual(len(self.svc.history.list()), 1)
+        self.assertEqual(self.post_json("reprint", {"id": "1234"})[0], 404)
+
+        self.post_json("settings", {"keep_history": False})
+        self.assertFalse(os.path.exists(self.svc.history.directory))  # ausschalten löscht alles
+
+    def test_foreign_host_rejected(self):
+        # DNS-Rebinding: fremde Domain, die auf 127.0.0.1 zeigt
+        headers = {"Host": f"evil.example:{self.port}"}
+        self.assertEqual(self.http("GET", "/status.json", headers)[0], 403)
+        self.assertEqual(self.http("GET", "/history.json", headers)[0], 403)
+        headers["X-CatPrinter"] = "1"
+        self.assertEqual(self.http("POST", "/action/test", headers)[0], 403)
+        self.assertEqual(self.http("GET", "/status.json", {"Host": f"localhost:{self.port}"})[0], 200)
 
     def test_unknown_operation(self):
         self.assertEqual(self.call(0x0033, []).code, ipp.OPERATION_NOT_SUPPORTED)

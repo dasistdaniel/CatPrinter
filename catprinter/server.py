@@ -15,7 +15,8 @@ from PIL import Image
 
 from . import ipp, pwg, statuspage
 from .pages import calibration_page, short_test_page
-from .printer import DEFAULT_DENSITY, DPI, MODES, Printer, PrinterError, prepare
+from .history import History
+from .printer import DEFAULT_DENSITY, DPI, MODES, Printer, PrinterError, prepare, scale_to_width
 
 log = logging.getLogger("server")
 
@@ -32,6 +33,7 @@ DEFAULT_CONFIG = {
     "trim_bottom": True,
     "rotate_180": True,        # Ausdruck aus Sicht des Drucker-Gesichts lesbar
     "image_mode": "auto",      # Modus bei Druckqualität "Normal": auto, text oder photo
+    "keep_history": False,     # Kopien gedruckter Seiten aufbewahren (Datenschutz: standardmäßig aus)
     "printer_name": "Cat Printer",
 }
 
@@ -69,7 +71,7 @@ def validate_settings(changes):
         elif key == "image_mode":
             if value not in MODES:
                 raise ValueError("Unbekannter Bildmodus")
-        elif key in ("rotate_180", "trim_bottom"):
+        elif key in ("rotate_180", "trim_bottom", "keep_history"):
             if not isinstance(value, bool):
                 raise ValueError(f"{key} muss true oder false sein")
         elif key == "com_port":
@@ -133,6 +135,9 @@ class Job:
         self.data = None
         self.quality = None  # IPP print-quality: 3 = Entwurf, 4 = Normal, 5 = Hoch
         self.density = None  # abweichende Druckdichte (Probedruck), sonst aus der Konfiguration
+        self.images = None   # fertige Seitenbilder statt Dokumentdaten (Nachdruck aus dem Verlauf)
+        self.internal = False  # Test-/Probe-/Nachdruck: nicht im Verlauf speichern
+        self.history_id = None
 
 
 class PrintService:
@@ -152,6 +157,7 @@ class PrintService:
         self.active = False   # gerade am Drucken?
         self.checking = False # Akkuabfrage läuft?
         self.printed = 0      # erfolgreich gedruckte Aufträge seit dem Start
+        self.history = History(os.path.join(os.path.dirname(self.config_file), "history"))
         self._stopped = False
         threading.Thread(target=self._worker, daemon=True).start()
 
@@ -187,12 +193,25 @@ class PrintService:
         img.save(buf, "PNG")
         job = self.new_job(name, "CatPrinterDriver", 1)
         job.density = density
+        job.internal = True
         self.submit(job, buf.getvalue())
+        return job
+
+    def reprint(self, hid):
+        """Druckt einen Auftrag aus dem Verlauf erneut (mit den aktuellen Einstellungen)."""
+        meta = self.history.meta(hid)
+        job = self.new_job(f"{meta['name']} (erneut)", "CatPrinterDriver", 1)
+        job.quality = meta.get("quality")
+        job.internal = True
+        self.submit(job, images=self.history.pages(hid))
         return job
 
     def update_settings(self, changes):
         """Übernimmt geprüfte Einstellungen sofort und speichert sie in config.json."""
         clean = validate_settings(changes)
+        if clean.get("keep_history") is False and self.cfg.get("keep_history"):
+            self.history.clear()  # Datenschutz: ausschalten = alles Gespeicherte löschen
+            log.info("Verlauf ausgeschaltet und gelöscht")
         self.cfg.update(clean)
         if "com_port" in clean or "bluetooth_name" in clean:
             # Leerer Port = beim nächsten Druck neu suchen
@@ -219,8 +238,9 @@ class PrintService:
                 del self.jobs[old]
         return job
 
-    def submit(self, job, data):
+    def submit(self, job, data=b"", images=None):
         job.data = data
+        job.images = images
         self.queue.put(job)
 
     def busy(self):
@@ -262,21 +282,17 @@ class PrintService:
             finally:
                 self.active = False
                 job.completed = self.uptime()
-                job.data = None
+                job.data = job.images = None
+                if job.history_id:
+                    self.history.set_state(job.history_id, "done" if job.state == COMPLETED else "failed")
 
     def _print(self, job):
-        data = job.data
-        if self.save_jobs_dir:
-            os.makedirs(self.save_jobs_dir, exist_ok=True)
-            with open(os.path.join(self.save_jobs_dir, f"job{job.id}.bin"), "wb") as f:
-                f.write(data)
-        if data[:4] == pwg.SYNC:
-            pages = []
-            for hdr, img in pwg.decode(data):
-                log.info("  %r", hdr)
-                pages.append(img)
-        else:
-            pages = [Image.open(io.BytesIO(data))]  # PNG/JPEG direkt (auch Testseite aus dem Tray)
+        pages = job.images or self._decode(job)
+        if self.cfg.get("keep_history") and not job.internal:
+            try:
+                job.history_id = self.history.add(job.name, [scale_to_width(p) for p in pages], job.quality)
+            except OSError:
+                log.exception("Auftrag konnte nicht im Verlauf gespeichert werden")
         rotate = self.cfg.get("rotate_180", True)
         mode = image_mode(job.quality, self.cfg.get("image_mode", "auto"))
         log.info("  Bildmodus: %s (Druckqualität %s)", mode, job.quality)
@@ -289,6 +305,38 @@ class PrintService:
         job.pages = len(images)
         density = job.density or self.cfg.get("density", DEFAULT_DENSITY)
         self.printer.print_images(images, self.cfg.get("feed_mm", 15), density)
+
+    def _decode(self, job):
+        data = job.data
+        if self.save_jobs_dir:
+            os.makedirs(self.save_jobs_dir, exist_ok=True)
+            with open(os.path.join(self.save_jobs_dir, f"job{job.id}.bin"), "wb") as f:
+                f.write(data)
+        if data[:4] == pwg.SYNC:
+            pages = []
+            for hdr, img in pwg.decode(data):
+                log.info("  %r", hdr)
+                pages.append(img)
+            return pages
+        return [Image.open(io.BytesIO(data))]  # PNG/JPEG direkt (auch Testseite aus dem Tray)
+
+    def preview(self, hid, number, thumb=False):
+        """Verlaufsseite so, wie sie gedruckt würde (1 Bit, ungedreht), als PNG.
+
+        thumb=True liefert eine kleine Graustufen-Miniatur – ein verkleinertes
+        Punktraster wäre nur Rauschen.
+        """
+        meta = self.history.meta(hid)
+        page = self.history.page(hid, number)
+        if thumb:
+            img = page.copy()
+            img.thumbnail((128, 256))
+        else:
+            mode = image_mode(meta.get("quality"), self.cfg.get("image_mode", "auto"))
+            img = prepare(page, self.cfg.get("trim_bottom", True), False, mode)
+        buf = io.BytesIO()
+        img.save(buf, "PNG")
+        return buf.getvalue()
 
 
 # ---------------------------------------------------------------- IPP-Attribute
@@ -477,13 +525,48 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def _host_ok(self):
+        """Schutz vor DNS-Rebinding: nur Anfragen an 127.0.0.1/localhost beantworten.
+
+        Sonst könnte eine fremde Webseite, deren Domain auf 127.0.0.1 zeigt, als
+        "gleiche Herkunft" Statusdaten und den Verlauf auslesen oder drucken.
+        """
+        port = self.server.server_address[1]
+        host = (self.headers.get("Host") or "").lower()
+        if host in (f"127.0.0.1:{port}", f"localhost:{port}", f"[::1]:{port}"):
+            return True
+        log.warning("Anfrage mit fremdem Host-Header abgelehnt: %r", host)
+        self._send(403, "text/plain", b"forbidden host")
+        return False
+
     def do_GET(self):
+        if not self._host_ok():
+            return
         path = self.path.split("?", 1)[0]
+        svc = self.service
         if path in ("/", "/index.html"):
             self._send(200, "text/html; charset=utf-8", statuspage.PAGE.encode("utf-8"))
         elif path == "/status.json":
-            body = json.dumps(statuspage.status_dict(self.service)).encode("utf-8")
-            self._send(200, "application/json", body)
+            self._json(200, statuspage.status_dict(svc))
+        elif path == "/history.json":
+            enabled = bool(svc.cfg.get("keep_history"))
+            self._json(200, {"enabled": enabled, "entries": svc.history.list() if enabled else []})
+        elif path.startswith("/history/"):
+            # /history/<id>/<seite>.png – so wie gedruckt; ?thumb=1 als Graustufen-Miniatur
+            parts = path.split("/")
+            try:
+                if len(parts) != 4 or not parts[3].endswith(".png"):
+                    raise KeyError(path)
+                body = svc.preview(parts[2], int(parts[3][:-4]), thumb="thumb=1" in self.path)
+            except (KeyError, ValueError, OSError):
+                self._send(404, "text/plain", b"not found")
+                return
+            self.send_response(200)
+            self.send_header("Content-Type", "image/png")
+            self.send_header("Content-Length", str(len(body)))
+            self.send_header("Cache-Control", "no-store")  # gedruckte Inhalte nicht im Browser-Cache
+            self.end_headers()
+            self.wfile.write(body)
         else:
             self._send(404, "text/plain", b"not found")
 
@@ -525,6 +608,17 @@ class Handler(BaseHTTPRequestHandler):
                 return
             self._json(200, {"applied": applied})
             return
+        elif name in ("reprint", "history-delete"):
+            try:
+                if name == "reprint":
+                    svc.reprint(data.get("id"))
+                else:
+                    svc.history.delete(data.get("id"))
+            except (KeyError, OSError):
+                self._json(404, {"error": "Eintrag nicht gefunden"})
+                return
+        elif name == "history-clear":
+            svc.history.clear()
         else:
             self._send(404, "text/plain", b"unknown action")
             return
@@ -532,6 +626,8 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         body = self._read_body()
+        if not self._host_ok():
+            return
         if self.path.startswith("/action/"):
             self._action(self.path[len("/action/"):], body)
             return
