@@ -120,6 +120,21 @@ h2 { font-size: 16px; margin: 0 0 12px; }
 .badge.failed { color: var(--err); background: var(--err-bg); }
 .badge.canceled { color: var(--muted); background: var(--neutral-bg); }
 .empty { color: var(--muted); padding: 24px 16px; text-align: center; }
+.section { margin-top: 24px; }
+.section > summary {
+  display: flex; align-items: baseline; gap: 10px; list-style: none;
+  cursor: pointer; margin-bottom: 12px; user-select: none;
+}
+.section > summary::-webkit-details-marker { display: none; }
+.section > summary::before {
+  content: ""; width: 7px; height: 7px; flex: none; align-self: center;
+  border-right: 2px solid var(--muted); border-bottom: 2px solid var(--muted);
+  transform: rotate(-45deg); transition: transform .15s;
+}
+.section[open] > summary::before { transform: rotate(45deg); }
+.section > summary h2 { margin: 0; }
+.summary-hint { color: var(--muted); font-size: 13px; }
+.section[open] .summary-hint { display: none; }
 .settings { padding: 4px 16px; }
 .field { padding: 14px 0; border-top: 1px solid var(--line); }
 .field:first-child { border-top: 0; }
@@ -204,7 +219,8 @@ footer { color: var(--muted); font-size: 12px; margin-top: 24px; text-align: cen
   <h2>Druckaufträge</h2>
   <div class="card jobs" id="jobs"><div class="empty">Noch keine Aufträge</div></div>
 
-  <h2 style="margin-top:24px">Einstellungen</h2>
+  <details class="section" id="settings-section">
+  <summary><h2>Einstellungen</h2><span class="summary-hint">Dichte, Bildmodus, Vorschub, Verbindung</span></summary>
   <form class="card settings" id="settings" autocomplete="off">
     <div class="field">
       <label for="f-density">Druckdichte</label>
@@ -256,6 +272,7 @@ footer { color: var(--muted); font-size: 12px; margin-top: 24px; text-align: cen
       <button type="submit" class="primary" id="btn-save">Speichern</button>
     </div>
   </form>
+  </details>
 
   <footer>CatPrinterDriver · aktualisiert sich automatisch · Änderungen gelten sofort und werden in config.json gespeichert</footer>
 </main>
