@@ -158,7 +158,9 @@ class TrayApp:
                                  "sonst werden Drucke blasser.", "Cat Printer: Akku schwach")
         elif event == "battery_full":
             self.set_state(self.state, self.detail)
-            self.icon.notify("Der Akku ist wieder voll geladen.", "Cat Printer")
+            self.icon.notify("Der Akku ist voll geladen – das USB-Kabel kann ab.", "Cat Printer")
+        elif event in ("battery_charging", "battery_unplugged"):
+            self.set_state(self.state, self.detail)  # Tooltip/Menü: "lädt …" bzw. wieder Prozent
 
     def set_state(self, state, detail):
         self.state, self.detail = state, detail
@@ -176,6 +178,9 @@ class TrayApp:
         b = self.service.battery if self.service else {}
         if not b:
             return "unbekannt" if short else "Akku: noch nicht gemessen"
+        if b.get("charging"):
+            text = "voll (am Ladekabel)" if b.get("full") else "lädt …"
+            return text if short else f"Akku: {text}"
         text = f"{b['percent']} % ({b['volts']:.2f} V)".replace(".", ",")
         if b["level"] == "critical":
             text += " – fast leer!"

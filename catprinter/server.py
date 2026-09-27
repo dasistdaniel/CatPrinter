@@ -47,6 +47,11 @@ DEFAULT_CONFIG = {
 
 BATTERY_CRITICAL_PERCENT = 5   # "fast leer"
 BATTERY_LOOP_SECONDS = 60      # so oft nachsehen, ob eine automatische Akkuprüfung fällig ist
+CHARGE_JUMP_VOLTS = 0.15       # Spannungssprung zwischen zwei Ruhemessungen = Kabel an/ab
+CHARGE_DROP_VOLTS = 0.04       # beim Laden sinkt die Spannung nicht – zweimal gesunken = abgesteckt
+CHARGE_FULL_VOLTS = 8.35       # Ladespannung oben angekommen (2 Zellen × 4,2 V)
+CHARGE_COMPARE_MAX_AGE = 6 * 3600  # ältere Messungen nicht mehr vergleichen
+CHARGING_CHECK_MINUTES = 5     # beim Laden öfter prüfen, damit "voll" rechtzeitig kommt
 
 # Papiergrößen in 1/100 mm (Breite = bedruckbare 48 mm, ohne Ränder).
 # Größere Formate werden auf 48 mm Breite verkleinert.
@@ -197,6 +202,12 @@ class PrintService:
         self._battery_alert = "ok"   # zuletzt gemeldete Warnstufe (jede Stufe nur einmal melden)
         self._battery_was_low = False  # für "voll geladen" nach dem Laden
         self._battery_try = 0.0
+        self._last_check = None        # (Volt, Zeit) der letzten Ruhemessung – für die Ladeerkennung
+        self._charge_full_notified = False
+        self._charge_full_count = 0
+        self._charge_drops = 0
+        self._battery_file = os.path.join(os.path.dirname(self.config_file), "battery.json")
+        self._load_battery()
         self._stopped = False
         threading.Thread(target=self._worker, daemon=True).start()
         threading.Thread(target=self._battery_loop, daemon=True).start()
@@ -235,15 +246,30 @@ class PrintService:
             self.checking = True
             self.run_task(task)
 
-    def _update_battery(self, status):
-        """Ladestand auswerten und Warnstufen melden (jede Stufe einmal, bis wieder geladen)."""
+    def _update_battery(self, status, source="check"):
+        """Ladestand auswerten und Warnstufen melden (jede Stufe einmal, bis wieder geladen).
+
+        source: "check" = Messung in Ruhe, "job" = direkt nach einem Druck (Spannung unter Last
+        abgesackt – taugt nicht für die Ladeerkennung).
+        """
         volts = battery_volts(status)
         if volts is None:
             return
+        now = time.time()
+        charging = self._detect_charging(volts, source, now)
         percent = battery_percent(volts)
         warn = int(self.cfg.get("battery_warn_percent", 15))
         level = "critical" if percent <= BATTERY_CRITICAL_PERCENT else "low" if percent <= warn else "ok"
-        self.battery = {"volts": volts, "percent": percent, "level": level, "time": int(time.time())}
+        self.battery = {"volts": volts, "percent": percent, "level": level, "time": int(now),
+                        "charging": charging, "full": charging and self._charge_full_notified}
+        if charging:
+            # Am Ladekabel misst der Drucker die Ladespannung mit – Prozent/Warnungen wären falsch
+            self.battery["level"] = "ok"
+            self._battery_alert = "ok"
+            self._battery_was_low = False
+            self._check_charge_full(volts)
+            self._save_battery()
+            return
         order = {"ok": 0, "low": 1, "critical": 2}
         if order[level] > order[self._battery_alert]:
             self._battery_alert = level
@@ -257,12 +283,77 @@ class PrintService:
             self._battery_was_low = False
             log.info("Akku voll geladen (%.2f V)", volts)
             self.emit("battery_full", percent=percent, volts=volts)
+        self._save_battery()
+
+    def _load_battery(self):
+        """Letzten Akkustand übernehmen (Neustart/Update während des Ladens: Ladeerkennung bleibt)."""
+        try:
+            with open(self._battery_file, encoding="utf-8") as f:
+                saved = json.load(f)
+        except (OSError, ValueError):
+            return
+        if time.time() - saved.get("battery", {}).get("time", 0) > CHARGE_COMPARE_MAX_AGE:
+            return
+        self.battery = saved.get("battery", {})
+        last = saved.get("last_check")
+        self._last_check = tuple(last) if last else None
+        self._battery_alert = saved.get("alert", "ok")
+        self._charge_full_notified = bool(saved.get("full_notified"))
+
+    def _save_battery(self):
+        try:
+            tmp = self._battery_file + ".tmp"
+            with open(tmp, "w", encoding="utf-8") as f:
+                json.dump({"battery": self.battery, "last_check": self._last_check, "alert": self._battery_alert,
+                           "full_notified": self._charge_full_notified}, f)
+            os.replace(tmp, self._battery_file)
+        except OSError:
+            log.debug("Akkustand nicht gespeichert", exc_info=True)
+
+    def _detect_charging(self, volts, source, now):
+        """Ladekabel erkennen: zwei Ruhemessungen hintereinander, Spannung springt um
+        ≥ 0,15 V nach oben (gemessen beim Anstecken: 7,32 → 7,54 V). Abstecken: Sprung nach unten."""
+        charging = bool(self.battery.get("charging"))
+        prev = self._last_check
+        if source != "check":
+            self._last_check = None  # nach einem Druck erholt sich die Spannung – nicht vergleichen
+            return charging
+        self._last_check = (volts, now)
+        if prev is None or now - prev[1] > CHARGE_COMPARE_MAX_AGE:
+            return charging
+        diff = round(volts - prev[0], 3)  # auf Millivolt runden (sonst 8,30 − 8,34 = −0,03999…)
+        if not charging and diff >= CHARGE_JUMP_VOLTS:
+            log.info("Ladekabel erkannt (%.2f V → %.2f V)", prev[0], volts)
+            self._charge_full_notified = False
+            self._charge_full_count = 0
+            self.emit("battery_charging", volts=volts)
+            return True
+        if charging:
+            # Beim Laden sinkt die Spannung nie: großer Abfall oder zweimal gesunken = abgesteckt
+            self._charge_drops = self._charge_drops + 1 if diff <= -CHARGE_DROP_VOLTS else 0
+            if diff <= -CHARGE_JUMP_VOLTS or self._charge_drops >= 2:
+                log.info("Ladekabel abgesteckt (%.2f V → %.2f V)", prev[0], volts)
+                self._charge_drops = 0
+                self.emit("battery_unplugged", volts=volts)
+                return False
+        return charging
+
+    def _check_charge_full(self, volts):
+        """Voll, sobald die Ladespannung zweimal hintereinander oben angekommen ist."""
+        self._charge_full_count = self._charge_full_count + 1 if volts >= CHARGE_FULL_VOLTS else 0
+        if self._charge_full_count >= 2 and not self._charge_full_notified:
+            self._charge_full_notified = True
+            self.battery["full"] = True
+            log.info("Akku voll geladen (%.2f V am Ladekabel)", volts)
+            self.emit("battery_full", percent=100, volts=volts)
 
     def _battery_loop(self):
         """Prüft den Akku regelmäßig automatisch, wenn gerade nichts gedruckt wird."""
         while not self._stopped:
             time.sleep(BATTERY_LOOP_SECONDS)
             minutes = int(self.cfg.get("battery_check_minutes", 30))
+            if minutes > 0 and self.battery.get("charging") and not self.battery.get("full"):
+                minutes = min(minutes, CHARGING_CHECK_MINUTES)  # beim Laden öfter nachsehen
             if minutes <= 0 or self._stopped or self.active or not self.queue.empty():
                 continue
             last = max(self.battery.get("time", 0), self._battery_try)
@@ -366,7 +457,7 @@ class PrintService:
                 log.info("Auftrag %d '%s' gedruckt (%d Seite(n))", job.id, job.name, job.pages)
                 if self.printer.last_status:
                     self.status = self.printer.last_status
-                    self._update_battery(self.status)
+                    self._update_battery(self.status, source="job")
                 self.emit("job_done", job=job, status=self.status)
             except Exception as e:  # noqa: BLE001 – jeder Fehler bricht nur diesen Auftrag ab
                 job.state = ABORTED
@@ -501,6 +592,8 @@ def printer_attributes(service, host):
         message = service.last_error[1][:200]
     elif service.cooling:
         message = "Drucker zu heiß – kühlt ab, druckt dann weiter"
+    elif service.battery.get("charging"):
+        message = "Akku voll (am Ladekabel)" if service.battery.get("full") else "Akku wird geladen"
     elif service.battery.get("level") in ("low", "critical"):
         message = f"Akku {'fast leer' if service.battery['level'] == 'critical' else 'schwach'} " \
                   f"({service.battery['percent']} %) – bitte per USB laden"

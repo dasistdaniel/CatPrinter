@@ -138,8 +138,16 @@ printing, **automatically every 30 minutes** (adjustable on the status page,
 0 = off; if the printer is off, nothing happens). The percentage is estimated
 from the voltage of the two-cell Li-ion battery (8.4 V = full) and shown in
 the tray tooltip and on the status page. Notifications: once at *low*
-(15 %, adjustable), once at *almost empty* (5 %), and *fully charged* after
-recharging.
+(15 %, adjustable), once at *almost empty* (5 %), and *fully charged*.
+
+**Charging:** while the USB cable is plugged in, the printer reports the
+charging voltage, so the percentage would look too high. The driver detects
+charging from a jump of ≥ 0.15 V between two idle readings (measured when
+plugging in: 7.32 → 7.54 V) and then shows *„lädt …“* instead of a percentage,
+pauses the warnings and checks every 5 minutes. When the charging voltage has
+reached the top (≥ 8.35 V) twice in a row, it reports *fully charged*.
+Unplugging is detected from the voltage dropping again. The last reading is
+kept in `battery.json`, so this also works across a restart.
 
 ## Printing
 

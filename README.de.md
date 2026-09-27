@@ -138,7 +138,16 @@ aus; ist der Drucker aus, passiert nichts). Der Prozentwert ist aus der
 Spannung des zweizelligen Li-Ionen-Akkus geschätzt (8,4 V = voll) und steht
 im Tray-Tooltip und auf der Statusseite. Benachrichtigungen: einmal bei
 *schwach* (15 %, einstellbar), einmal bei *fast leer* (5 %) und *voll
-geladen* nach dem Laden.
+geladen*.
+
+**Laden:** Am USB-Kabel meldet der Drucker die Ladespannung mit, die Prozente
+wären dann zu hoch. Der Treiber erkennt das Laden an einem Sprung um
+≥ 0,15 V zwischen zwei Messungen in Ruhe (gemessen beim Anstecken:
+7,32 → 7,54 V), zeigt dann *„lädt …“* statt einer Prozentzahl, setzt die
+Warnungen aus und prüft alle 5 Minuten. Ist die Ladespannung zweimal
+hintereinander oben angekommen (≥ 8,35 V), meldet er *voll geladen*. Das
+Abstecken erkennt er am erneuten Abfall der Spannung. Der letzte Messwert steht
+in `battery.json`, damit das auch über einen Neustart hinweg funktioniert.
 
 ## Drucken
 

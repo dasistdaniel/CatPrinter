@@ -128,6 +128,14 @@ class PrinterJobTest(unittest.TestCase):
         self.assertLess(prepare(img).height, 120)
 
 
+def temp_service(test, **cfg):
+    """PrintService mit eigenem Temp-Ordner – nie die echte config.json/battery.json anfassen."""
+    tmp = tempfile.TemporaryDirectory()
+    test.addCleanup(tmp.cleanup)
+    return server.PrintService(dict(server.DEFAULT_CONFIG, uuid="x", **cfg),
+                               config_file=os.path.join(tmp.name, "config.json"))
+
+
 class FakeSerial:
     """Simulierter Drucker-Port: DLE EOT 3 meldet 'heiß', bis hot_replies aufgebraucht sind."""
 
@@ -251,7 +259,7 @@ class HeatTest(unittest.TestCase):
         self.assertGreater(new.written, 0)
 
     def test_service_shows_cooling(self):
-        svc = server.PrintService(dict(server.DEFAULT_CONFIG, uuid="x"))
+        svc = temp_service(self)
         self.addCleanup(svc.stop)
         svc.printer = FakePrinter(heat=True)
         events = []
@@ -378,7 +386,7 @@ class FakePrinter:
 
 class ServiceTest(unittest.TestCase):
     def make_service(self, fail=False):
-        svc = server.PrintService(dict(server.DEFAULT_CONFIG, uuid="x"))
+        svc = temp_service(self)
         svc.printer = FakePrinter(fail)
         events = []
         svc.listeners.append(lambda event, **data: events.append((event, data)))
@@ -452,10 +460,57 @@ class ServiceTest(unittest.TestCase):
             svc._update_battery({"VOLT": volts + "mv"})
         self.assertEqual(battery(), [("battery", "low"), ("battery", "critical")])
         self.assertEqual(svc.battery["level"], "critical")
-        svc._update_battery({"VOLT": "8420mv"})           # geladen
-        self.assertEqual(battery()[-1], ("battery_full", None))
-        svc._update_battery({"VOLT": "7200mv"})           # entlädt sich wieder (10 %): erneut warnen
-        self.assertEqual(battery()[-1], ("battery", "low"))
+        svc._update_battery({"VOLT": "8400mv"})           # Kabel an (Sprung nach oben)
+        svc._update_battery({"VOLT": "8420mv"})           # zweimal oben: voll
+        self.assertEqual(battery()[-2:], [("battery_charging", None), ("battery_full", None)])
+        svc._update_battery({"VOLT": "7200mv"})           # abgesteckt, später leer (10 %): erneut warnen
+        self.assertEqual(battery()[-2:], [("battery_unplugged", None), ("battery", "low")])
+
+    def test_charging_detected_and_full_reported_once(self):
+        svc, events = self.make_service()
+        names = lambda: [e for e, _d in events if e.startswith("battery")]
+        check = lambda v: svc._update_battery({"VOLT": f"{v}mv"}, source="check")
+        check(7320)
+        check(7540)                                       # Kabel an (gemessen: +0,22 V)
+        self.assertTrue(svc.battery["charging"])
+        self.assertEqual(names(), ["battery_charging"])
+        for v in (7900, 8200, 8360, 8370, 8380):          # lädt, oben angekommen
+            check(v)
+        self.assertEqual(names().count("battery_full"), 1)
+        self.assertTrue(svc.battery["full"])
+        check(8340)
+        check(8300)                                        # zweimal gesunken: abgesteckt
+        self.assertFalse(svc.battery["charging"])
+        self.assertEqual(names()[-1], "battery_unplugged")
+
+    def test_charging_state_survives_restart(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg_file = os.path.join(tmp, "config.json")
+            a = server.PrintService(dict(server.DEFAULT_CONFIG, uuid="x"), config_file=cfg_file)
+            a._update_battery({"VOLT": "7320mv"})
+            a._update_battery({"VOLT": "7540mv"})          # Kabel an
+            a.stop()
+            b = server.PrintService(dict(server.DEFAULT_CONFIG, uuid="x"), config_file=cfg_file)
+            self.addCleanup(b.stop)
+            self.assertTrue(b.battery["charging"])         # nach Neustart/Update weiter "lädt"
+            events = []
+            b.listeners.append(lambda e, **d: events.append(e))
+            b._update_battery({"VOLT": "8360mv"})
+            b._update_battery({"VOLT": "8370mv"})
+            self.assertIn("battery_full", events)
+
+    def test_voltage_recovery_after_print_is_not_charging(self):
+        svc, events = self.make_service()
+        svc._update_battery({"VOLT": "7200mv"}, source="job")   # nach dem Druck abgesackt
+        svc._update_battery({"VOLT": "7450mv"}, source="check")  # erholt sich in Ruhe
+        self.assertFalse(svc.battery["charging"])
+
+    def test_no_warnings_while_charging(self):
+        svc, events = self.make_service()
+        svc._update_battery({"VOLT": "6900mv"}, source="check")
+        svc._update_battery({"VOLT": "7100mv"}, source="check")  # +0,2 V: Kabel an
+        self.assertTrue(svc.battery["charging"])
+        self.assertEqual(svc.battery["level"], "ok")
 
     def test_quiet_check_stays_silent_when_printer_off(self):
         svc, events = self.make_service()

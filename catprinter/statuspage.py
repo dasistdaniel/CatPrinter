@@ -112,6 +112,12 @@ h1 { font-size: 24px; margin: 0; line-height: 1.2; }
 .battery-bar div { height: 100%; width: 0; background: var(--ok); border-radius: 3px; transition: width .3s; }
 .battery-bar div.warnlow { background: var(--wait); }
 .battery-bar div.low { background: var(--err); }
+.battery-bar div.charging {
+  width: 100%;
+  background: repeating-linear-gradient(-45deg, var(--ok) 0 8px, transparent 8px 16px);
+  background-size: 22.6px 100%; animation: charge 1s linear infinite; opacity: .7;
+}
+@keyframes charge { to { background-position: 22.6px 0; } }
 .netinfo {
   background: var(--busy-bg); color: var(--text); border-radius: 12px;
   padding: 10px 16px; margin-bottom: 16px; font-size: 14px;
@@ -530,6 +536,14 @@ function render(s) {
       b.level === "critical" ? "fast leer – jetzt per USB laden (" + volts + ")" :
       b.level === "low" ? "schwach – bitte bald laden (" + volts + ")" :
       volts + " · gemessen " + when;
+    if (b.charging) {
+      // Am Kabel misst der Drucker die Ladespannung mit – keine (geschönte) Prozentzahl zeigen
+      $("volts").textContent = b.full ? "voll" : "lädt …";
+      $("volts").className = "value";
+      $("battery-fill").style.width = b.full ? "100%" : "";
+      $("battery-fill").className = b.full ? "" : "charging";
+      $("volts-hint").textContent = (b.full ? "am Ladekabel · " : "Ladespannung " + volts + " · ") + "gemessen " + when;
+    }
   }
   if (s.checking) $("volts-hint").textContent = "wird gemessen …";
   $("port").textContent = s.port || "Automatisch";
