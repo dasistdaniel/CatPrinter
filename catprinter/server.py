@@ -13,7 +13,8 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from PIL import Image
 
-from . import ipp, netshare, pwg, statuspage
+from . import i18n, ipp, netshare, pwg, statuspage
+from .i18n import t
 from .pages import calibration_page, short_test_page
 from .history import History, replace_with_retry
 from .printer import (DEFAULT_DENSITY, DPI, IDLE_CLOSE, MODES, Printer, battery_percent, battery_volts, PrinterError, is_photo_page, photo_brightness,
@@ -42,6 +43,7 @@ DEFAULT_CONFIG = {
     "photo_brightness": 0,     # Foto-Helligkeit in Prozent (-30 … +50), nur Fotos
     "battery_check_minutes": 30,  # Akku automatisch prüfen (Minuten, 0 = aus)
     "battery_warn_percent": 15,   # ab diesem Ladestand warnen
+    "language": "auto",        # Sprache für Tray, Meldungen, Testseiten: auto (Windows), de, en
     "printer_name": "Cat Printer",
 }
 
@@ -80,35 +82,38 @@ def validate_settings(changes):
     for key, value in changes.items():
         if key == "density":
             if isinstance(value, bool) or not isinstance(value, int) or not 5 <= value <= 80:
-                raise ValueError("Druckdichte muss eine ganze Zahl von 5 bis 80 sein")
+                raise ValueError(t("density_range"))
         elif key == "feed_mm":
             if isinstance(value, bool) or not isinstance(value, int) or not 0 <= value <= 50:
-                raise ValueError("Vorschub muss eine ganze Zahl von 0 bis 50 mm sein")
+                raise ValueError(t("feed_range"))
         elif key == "battery_check_minutes":
             if isinstance(value, bool) or not isinstance(value, int) or not 0 <= value <= 240:
-                raise ValueError("Akkuprüfung: 0 (aus) bis 240 Minuten")
+                raise ValueError(t("battery_check_range"))
         elif key == "battery_warn_percent":
             if isinstance(value, bool) or not isinstance(value, int) or not 5 <= value <= 50:
-                raise ValueError("Akkuwarnung: 5 bis 50 Prozent")
+                raise ValueError(t("battery_warn_range"))
         elif key == "photo_brightness":
             if isinstance(value, bool) or not isinstance(value, int) or not -30 <= value <= 50:
-                raise ValueError("Foto-Helligkeit muss eine ganze Zahl von -30 bis 50 sein")
+                raise ValueError(t("brightness_range"))
         elif key == "image_mode":
             if value not in MODES:
-                raise ValueError("Unbekannter Bildmodus")
+                raise ValueError(t("unknown_mode"))
+        elif key == "language":
+            if value not in i18n.LANGUAGES:
+                raise ValueError(t("unknown_language"))
         elif key in ("rotate_180", "trim_bottom", "keep_history", "share_network", "match_windows_tone"):
             if not isinstance(value, bool):
-                raise ValueError(f"{key} muss true oder false sein")
+                raise ValueError(t("must_bool", key=key))
         elif key == "com_port":
             value = (value or "").strip().upper() or None
             if value is not None and not (value.startswith("COM") and value[3:].isdigit()):
-                raise ValueError("COM-Port muss wie COM13 aussehen oder leer sein (automatisch)")
+                raise ValueError(t("com_port_format"))
         elif key == "bluetooth_name":
             value = str(value).strip()
             if not 1 <= len(value) <= 32:
-                raise ValueError("Bluetooth-Name darf nicht leer sein")
+                raise ValueError(t("bt_name_empty"))
         else:
-            raise ValueError(f"Einstellung {key} kann hier nicht geändert werden")
+            raise ValueError(t("not_editable", key=key))
         clean[key] = value
     return clean
 
@@ -182,6 +187,7 @@ class PrintService:
     def __init__(self, cfg, save_jobs_dir=None, config_file=None):
         self.config_file = config_file or CONFIG_FILE
         self.cfg = cfg
+        i18n.set_language(cfg.get("language", "auto"))
         self.printer = Printer(cfg.get("com_port"), cfg.get("bluetooth_name", "YHK-"))
         self.jobs = {}
         self.ids = itertools.count(1)
@@ -389,6 +395,8 @@ class PrintService:
             self.history.clear()  # Datenschutz: ausschalten = alles Gespeicherte löschen
             log.info("Verlauf ausgeschaltet und gelöscht")
         self.cfg.update(clean)
+        if "language" in clean:
+            i18n.set_language(clean["language"])
         if "com_port" in clean or "bluetooth_name" in clean:
             # Leerer Port = beim nächsten Druck neu suchen
             self.printer.port = self.cfg.get("com_port")
@@ -586,19 +594,19 @@ def printer_attributes(service, host):
     uri = f"ipp://{host}/ipp/print"
     busy = service.busy()
     reasons = ["none"]
-    message = "Bereit"
+    message = t("state_ready")
     if service.last_error and time.time() - service.last_error[0] < 120:
         reasons = ["offline-report"]
         message = service.last_error[1][:200]
     elif service.cooling:
-        message = "Drucker zu heiß – kühlt ab, druckt dann weiter"
+        message = t("state_cooling")
     elif service.battery.get("charging"):
-        message = "Akku voll (am Ladekabel)" if service.battery.get("full") else "Akku wird geladen"
+        message = t("state_charged") if service.battery.get("full") else t("state_charging")
     elif service.battery.get("level") in ("low", "critical"):
-        message = f"Akku {'fast leer' if service.battery['level'] == 'critical' else 'schwach'} " \
-                  f"({service.battery['percent']} %) – bitte per USB laden"
+        message = t("state_battery_critical" if service.battery["level"] == "critical"
+                    else "state_battery_low", percent=service.battery["percent"])
     elif busy:
-        message = "Druckt"
+        message = t("state_printing")
     name = cfg.get("printer_name", "Cat Printer")
     I, K, B, T, N, E = ipp.INTEGER, ipp.KEYWORD, ipp.BOOLEAN, ipp.TEXT, ipp.NAME, ipp.ENUM
     ops = [ipp.PRINT_JOB, ipp.VALIDATE_JOB, ipp.CREATE_JOB, ipp.SEND_DOCUMENT, ipp.CANCEL_JOB,
@@ -828,14 +836,14 @@ class Handler(BaseHTTPRequestHandler):
         try:
             data = json.loads(body or b"{}")
             if not isinstance(data, dict):
-                raise ValueError("JSON-Objekt erwartet")
+                raise ValueError(t("json_object"))
         except ValueError as e:
-            self._json(400, {"error": f"Ungültige Daten: {e}"})
+            self._json(400, {"error": t("invalid_data", err=e)})
             return
         if name == "test":
             volts = statuspage.battery_volts(svc.status)
-            info = f"Akku {volts:.2f} V".replace(".", ",") if volts else ""
-            svc.print_image("Testseite", short_test_page(info))
+            info = t("battery_info", v=i18n.volts(volts)) if volts else ""
+            svc.print_image(t("test_page"), short_test_page(info))
         elif name == "battery":
             svc.refresh_status()
         elif name == "calibrate":
@@ -844,7 +852,7 @@ class Handler(BaseHTTPRequestHandler):
             except ValueError as e:
                 self._json(400, {"error": str(e)})
                 return
-            svc.print_image(f"Probedruck Dichte {density}", calibration_page(density), density)
+            svc.print_image(t("sample_job", d=density), calibration_page(density), density)
         elif name == "settings":
             try:
                 applied = svc.update_settings(data)
@@ -860,7 +868,7 @@ class Handler(BaseHTTPRequestHandler):
                 else:
                     svc.history.delete(data.get("id"))
             except (KeyError, OSError):
-                self._json(404, {"error": "Eintrag nicht gefunden"})
+                self._json(404, {"error": t("entry_not_found")})
                 return
         elif name == "history-clear":
             svc.history.clear()
@@ -930,7 +938,7 @@ class Handler(BaseHTTPRequestHandler):
         if op in (ipp.PRINT_JOB, ipp.CREATE_JOB):
             fmt = req.get("document-format", ipp.OPERATION)
             if op == ipp.PRINT_JOB and not _format_ok(fmt, doc):
-                return self._response(req, ipp.DOCUMENT_FORMAT_NOT_SUPPORTED, f"Format {fmt} nicht unterstützt")
+                return self._response(req, ipp.DOCUMENT_FORMAT_NOT_SUPPORTED, t("format_unsupported", fmt=fmt))
             job = svc.new_job(req.get("job-name", ipp.OPERATION) or "Dokument",
                               req.get("requesting-user-name", ipp.OPERATION) or "Windows",
                               req.get("copies", ipp.JOB) or 1)
@@ -947,11 +955,11 @@ class Handler(BaseHTTPRequestHandler):
 
         if op == ipp.SEND_DOCUMENT:
             if job is None:
-                return self._response(req, ipp.NOT_FOUND, "Auftrag nicht gefunden")
+                return self._response(req, ipp.NOT_FOUND, t("job_not_found"))
             fmt = req.get("document-format", ipp.OPERATION)
             if doc and not _format_ok(fmt, doc):
                 job.state, job.completed = ABORTED, svc.uptime()
-                return self._response(req, ipp.DOCUMENT_FORMAT_NOT_SUPPORTED, f"Format {fmt} nicht unterstützt")
+                return self._response(req, ipp.DOCUMENT_FORMAT_NOT_SUPPORTED, t("format_unsupported", fmt=fmt))
             if doc:
                 svc.submit(job, doc)
             elif req.get("last-document", ipp.OPERATION):
@@ -963,7 +971,7 @@ class Handler(BaseHTTPRequestHandler):
 
         if op == ipp.GET_JOB_ATTRIBUTES:
             if job is None:
-                return self._response(req, ipp.NOT_FOUND, "Auftrag nicht gefunden")
+                return self._response(req, ipp.NOT_FOUND, t("job_not_found"))
             resp = self._response(req, ipp.OK)
             resp.add_group(ipp.JOB, _filter(job_attributes(svc, job, host),
                                             req.get_all("requested-attributes", ipp.OPERATION)))
@@ -971,9 +979,9 @@ class Handler(BaseHTTPRequestHandler):
 
         if op == ipp.CANCEL_JOB:
             if job is None:
-                return self._response(req, ipp.NOT_FOUND, "Auftrag nicht gefunden")
+                return self._response(req, ipp.NOT_FOUND, t("job_not_found"))
             if job.state in (COMPLETED, ABORTED, CANCELED) or job.state == PROCESSING:
-                return self._response(req, ipp.NOT_POSSIBLE, "Auftrag kann nicht mehr abgebrochen werden")
+                return self._response(req, ipp.NOT_POSSIBLE, t("job_not_cancelable"))
             job.state, job.completed = CANCELED, svc.uptime()
             return self._response(req, ipp.OK)
 

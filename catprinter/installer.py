@@ -16,7 +16,8 @@ import time
 import urllib.request
 import winreg
 
-from . import __version__, netshare
+from . import __version__, i18n, netshare
+from .i18n import t
 from .server import CONFIG_DIR, load_config
 
 log = logging.getLogger("installer")
@@ -167,18 +168,19 @@ def _copy_self():
 
 # ---------------------------------------------------------------- Ablauf
 
+def _use_configured_language():
+    i18n.set_language(load_config().get("language", "auto"))
+
+
 def install(ask=True):
+    _use_configured_language()
     update = os.path.exists(INSTALLED_EXE)
     if ask:
-        text = (f"Cat Printer {__version__} {'aktualisieren' if update else 'installieren'}?\n\n"
-                f"• Programm nach {INSTALL_DIR}\n"
-                "• Start bei der Anmeldung (Symbol im Infobereich)\n"
-                "• Eintrag im Startmenü und unter „Apps & Features“\n")
+        text = t("update_question" if update else "install_question", version=__version__) + "\n\n"
+        text += t("install_steps", dir=INSTALL_DIR)
         if not printer_exists():
-            text += "• Drucker „Cat Printer“ in Windows anlegen (Windows fragt nach Adminrechten)\n"
-        text += ("\nJa = installieren\n"
-                 "Nein = ohne Installation starten (nur jetzt, kein Autostart)\n"
-                 "Abbrechen = nichts tun")
+            text += t("install_step_printer")
+        text += t("install_choice")
         answer = _box(text, MB_YESNOCANCEL | MB_ICONQUESTION)
         if answer == IDNO:
             return RUN_WITHOUT_INSTALL
@@ -199,22 +201,18 @@ def install(ask=True):
 
     printer_note = ""
     if not running:
-        printer_note = "\n\nDer Server ist nicht gestartet – siehe Log in " + CONFIG_DIR
+        printer_note = t("server_not_started", dir=CONFIG_DIR)
     elif not printer_exists() and not add_printer():
-        printer_note = ("\n\nDer Drucker konnte nicht angelegt werden (Adminrechte abgelehnt?). "
-                        "Starte die Installation erneut, um es nochmal zu versuchen.")
+        printer_note = t("printer_add_failed")
     log.info("Installiert: %s (%s)", INSTALLED_EXE, __version__)
     if ask:
-        _box(f"Cat Printer ist {'aktualisiert' if update else 'installiert'}.\n\n"
-             "Wähle im Druckdialog eines beliebigen Programms „Cat Printer“. "
-             "Das Katzen-Symbol im Infobereich zeigt Status und Akku." + printer_note)
+        _box(t("updated" if update else "installed") + t("installed_hint") + printer_note)
     return 0
 
 
 def uninstall(ask=True):
-    if ask and _box("Cat Printer deinstallieren?\n\nDer Drucker „Cat Printer“ (und ggf. die Firewall-Regeln der "
-                    "Netzwerkfreigabe) werden aus Windows entfernt – Windows fragt nach Adminrechten.",
-                    MB_YESNO | MB_ICONWARNING) != IDYES:
+    _use_configured_language()
+    if ask and _box(t("uninstall_question"), MB_YESNO | MB_ICONWARNING) != IDYES:
         return 1
     stop_running()
     for folder, name in (("Startup", STARTUP_LNK), ("Programs", STARTMENU_LNK)):
@@ -236,15 +234,14 @@ def uninstall(ask=True):
         _elevated("; ".join(admin_steps))
 
     if ask and os.path.isdir(CONFIG_DIR) and _box(
-            "Auch Einstellungen, Log und Verlauf löschen?\n" + CONFIG_DIR, MB_YESNO | MB_ICONQUESTION) == IDYES:
+            t("delete_settings_question", dir=CONFIG_DIR), MB_YESNO | MB_ICONQUESTION) == IDYES:
         shutil.rmtree(CONFIG_DIR, ignore_errors=True)
 
     # Die laufende exe kann sich nicht selbst löschen: kurz warten lassen, dann Ordner entfernen
     subprocess.Popen(f'cmd /c ping 127.0.0.1 -n 4 >nul & rmdir /s /q "{INSTALL_DIR}"',
                      creationflags=subprocess.CREATE_NO_WINDOW | subprocess.DETACHED_PROCESS, close_fds=True)
     if ask:
-        _box("Cat Printer wurde deinstalliert." + (
-            "" if not printer_exists() else "\n\nDer Drucker „Cat Printer“ konnte nicht entfernt werden."))
+        _box(t("uninstalled") + ("" if not printer_exists() else t("printer_not_removed")))
     return 0
 
 

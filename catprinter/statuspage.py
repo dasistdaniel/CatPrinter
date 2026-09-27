@@ -1,6 +1,7 @@
 """Statusseite (http://127.0.0.1:631/) und ihre JSON-Daten."""
 import time
 
+from . import i18n
 from .printer import battery_volts
 
 STATE_KEYS = {3: "pending", 5: "printing", 7: "canceled", 8: "failed", 9: "done"}
@@ -35,7 +36,9 @@ def status_dict(service):
             "photo_brightness": int(cfg.get("photo_brightness", 0)),
             "battery_check_minutes": int(cfg.get("battery_check_minutes", 30)),
             "battery_warn_percent": int(cfg.get("battery_warn_percent", 15)),
+            "language": cfg.get("language", "auto"),
         },
+        "lang": i18n.current(),
         "network": dict(service.net_status, enabled=bool(cfg.get("share_network", False)),
                         port=cfg["http_port"]),
         "url": f"ipp://{cfg['http_host']}:{cfg['http_port']}/ipp/print",
@@ -381,6 +384,15 @@ footer { color: var(--muted); font-size: 12px; margin-top: 24px; text-align: cen
       <label class="check" style="margin-top:10px"><input type="checkbox" id="f-tone" name="match_windows_tone"> <span data-i18n="matchTone"></span></label>
       <p class="help" data-i18n="matchToneHelp"></p>
     </div>
+    <div class="field">
+      <label for="f-language" data-i18n="language"></label>
+      <select id="f-language" name="language" style="width:auto">
+        <option value="auto" data-i18n="langAuto"></option>
+        <option value="de">Deutsch</option>
+        <option value="en">English</option>
+      </select>
+      <p class="help" data-i18n="languageHelp"></p>
+    </div>
     <details class="field">
       <summary data-i18n="connection"></summary>
       <div class="twocol">
@@ -432,7 +444,7 @@ const I18N = {
     enableInSettings: "In den Einstellungen einschalten", historyEmpty: "Noch nichts gespeichert – der nächste Druck erscheint hier.",
     confirmClear: "Alle gespeicherten Aufträge löschen?",
     confirmHistoryOff: "Verlauf ausschalten? Alle {0} gespeicherten Aufträge werden gelöscht.",
-    settings: "Einstellungen", settingsHint: "Dichte, Bildmodus, Vorschub, Akku, Verbindung",
+    settings: "Einstellungen", settingsHint: "Dichte, Bildmodus, Vorschub, Akku, Sprache, Verbindung",
     density: "Druckdichte", printSample: "Probe drucken",
     densityHelp: "Heizstärke. Höher = dunkler, aber feine Details laufen eher zu. Getestet: 40. WalkPrint nutzt 25.",
     imageMode: "Bildmodus", modeAuto: "Automatisch – Text scharf, Fotos gerastert",
@@ -451,6 +463,8 @@ const I18N = {
     shareNetworkHelp: "Macht den Drucker für Handys und andere Geräte im selben WLAN sichtbar (Android: „Standard-Druckdienst“). Nur Drucken ist aus dem Netz erreichbar – Statusseite, Einstellungen und Verlauf bleiben auf diesem PC. Beim ersten Einschalten fragt Windows nach Adminrechten für die Firewall. Jeder im Heimnetz kann dann drucken.",
     matchTone: "Fotos vom Handy aufhellen wie am PC",
     matchToneHelp: "Windows hellt beim Drucken die Schatten von Fotos auf, Handys nicht – ohne Ausgleich werden Handy-Fotos deutlich dunkler. Betrifft nur Fotos, nicht Text und Grafik.",
+    language: "Sprache", langAuto: "Automatisch (wie Windows)",
+    languageHelp: "Für Statusseite, Tray-Symbol, Benachrichtigungen und Testseiten. Der Umschalter DE | EN oben rechts stellt das auch um.",
     comPort: "COM-Port", automatic: "automatisch", btName: "Bluetooth-Name beginnt mit",
     connectionHelp: "COM-Port leer lassen, um den Drucker automatisch über seinen Bluetooth-Namen zu finden. Druckeradresse für Windows:",
     discard: "Verwerfen", save: "Speichern", unsaved: "Nicht gespeicherte Änderungen",
@@ -479,7 +493,7 @@ const I18N = {
     enableInSettings: "Turn it on in the settings", historyEmpty: "Nothing stored yet – the next print will appear here.",
     confirmClear: "Delete all stored jobs?",
     confirmHistoryOff: "Turn off the history? All {0} stored jobs will be deleted.",
-    settings: "Settings", settingsHint: "Density, image mode, feed, battery, connection",
+    settings: "Settings", settingsHint: "Density, image mode, feed, battery, language, connection",
     density: "Print density", printSample: "Print sample",
     densityHelp: "Heat strength. Higher = darker, but fine details fill in more easily. Tested: 40. WalkPrint uses 25.",
     imageMode: "Image mode", modeAuto: "Automatic – sharp text, dithered photos",
@@ -498,6 +512,8 @@ const I18N = {
     shareNetworkHelp: "Makes the printer visible to phones and other devices on the same Wi-Fi (Android: “Default Print Service”). Only printing is reachable from the network – status page, settings and history stay on this PC. The first time, Windows asks for admin rights for the firewall. Anyone on your home network can then print.",
     matchTone: "Lighten phone photos like on the PC",
     matchToneHelp: "Windows lightens photo shadows when printing, phones don't – without this, phone photos come out noticeably darker. Only affects photos, not text and graphics.",
+    language: "Language", langAuto: "Automatic (like Windows)",
+    languageHelp: "For the status page, tray icon, notifications and test pages. The DE | EN switch at the top right changes it too.",
     comPort: "COM port", automatic: "automatic", btName: "Bluetooth name starts with",
     connectionHelp: "Leave the COM port empty to find the printer automatically by its Bluetooth name. Printer address for Windows:",
     discard: "Discard", save: "Save", unsaved: "Unsaved changes",
@@ -506,14 +522,10 @@ const I18N = {
   },
 };
 
-function pickLang() {
-  try {
-    const stored = localStorage.getItem("catprinter-lang");
-    if (stored === "de" || stored === "en") return stored;
-  } catch { /* Speicher nicht verfügbar */ }
-  return (navigator.language || "en").toLowerCase().startsWith("de") ? "de" : "en";
-}
-let lang = pickLang();
+// Bis der Server antwortet, nach der Browsersprache raten; danach gilt die Sprache des Programms
+// (Einstellung "language": automatisch nach Windows, Deutsch oder English – gilt auch fürs Tray).
+let lang = (navigator.language || "en").toLowerCase().startsWith("de") ? "de" : "en";
+let langLock = 0;
 
 function t(key, ...args) {
   const text = (I18N[lang] && I18N[lang][key]) ?? I18N.de[key] ?? key;
@@ -533,15 +545,24 @@ function applyStatic() {
   document.querySelectorAll(".lang button").forEach((b) => b.classList.toggle("active", b.dataset.lang === lang));
 }
 function setLang(l) {
+  if (l === lang) return;
   lang = l;
-  try { localStorage.setItem("catprinter-lang", l); } catch { /* egal */ }
   applyStatic();
   historyKey = "";  // Verlauf in der neuen Sprache neu zeichnen
   if (lastStatus) render(lastStatus);
   if (lastHistory) renderHistory(lastHistory);
   if (dirty) setMsg(t("unsaved"));
 }
-document.querySelectorAll(".lang button").forEach((b) => { b.onclick = () => setLang(b.dataset.lang); });
+// DE | EN stellt das ganze Programm um (Seite, Tray-Symbol, Meldungen)
+document.querySelectorAll(".lang button").forEach((b) => {
+  b.onclick = async () => {
+    langLock = Date.now() + 3000;  // laufende Refreshes mit der alten Sprache nicht übernehmen
+    $("f-language").value = b.dataset.lang;  // sonst würde ein späteres "Speichern" zurückstellen
+    setLang(b.dataset.lang);
+    try { await post("settings", { language: b.dataset.lang }); } catch { /* nächster Refresh zeigt den Stand */ }
+    refresh();
+  };
+});
 
 const JOB = { done: "jobDone", printing: "jobPrinting", pending: "jobPending", failed: "jobFailed", canceled: "jobCanceled" };
 let saved = null;   // Einstellungen laut Server
@@ -563,6 +584,7 @@ function fillForm(s) {
   $("f-bright").value = s.photo_brightness;
   $("f-battery-check").value = String(s.battery_check_minutes);
   $("f-battery-warn").value = s.battery_warn_percent;
+  $("f-language").value = s.language;
   $("bright-out").textContent = fmtPercent(s.photo_brightness);
 }
 function fmtPercent(v) { v = Number(v); return (v > 0 ? "+" : "") + v + " %"; }
@@ -581,6 +603,7 @@ function readForm() {
     photo_brightness: Number($("f-bright").value),
     battery_check_minutes: Number($("f-battery-check").value),
     battery_warn_percent: Number($("f-battery-warn").value),
+    language: $("f-language").value,
   };
 }
 function changes() {
@@ -675,6 +698,7 @@ function renderBattery(b, checking) {
 
 function render(s) {
   lastStatus = s;
+  if (s.lang && s.lang !== lang && Date.now() > langLock) { setLang(s.lang); return; }  // setLang zeichnet neu
   $("name").textContent = s.name;
   document.title = s.name + " – " + t(s.state);
   const pill = $("pill");

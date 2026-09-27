@@ -341,6 +341,43 @@ class NetworkAccessTest(unittest.TestCase):
         self.assertEqual(self.ipp_attrs()[0], 403)
 
 
+class I18nTest(unittest.TestCase):
+    def tearDown(self):
+        from catprinter import i18n
+        i18n.set_language("auto")
+
+    def test_all_texts_have_both_languages_and_same_placeholders(self):
+        import string
+        from catprinter.i18n import TEXTS
+        fields = lambda s: sorted(f for _l, f, _s, _c in string.Formatter().parse(s) if f)
+        for key, pair in TEXTS.items():
+            self.assertEqual(len(pair), 2, key)
+            self.assertTrue(all(pair), key)
+            self.assertEqual(fields(pair[0]), fields(pair[1]), key)
+
+    def test_messages_follow_language_setting(self):
+        from catprinter import i18n
+        i18n.set_language("en")
+        with self.assertRaises(ValueError) as err:
+            server.validate_settings({"density": 500})
+        self.assertIn("Print density", str(err.exception))
+        self.assertEqual(i18n.volts(7.18), "7.18 V")
+        i18n.set_language("de")
+        with self.assertRaises(ValueError) as err:
+            server.validate_settings({"density": 500})
+        self.assertIn("Druckdichte", str(err.exception))
+        self.assertEqual(i18n.volts(7.18), "7,18 V")
+        with self.assertRaises(ValueError):
+            server.validate_settings({"language": "fr"})
+
+    def test_language_setting_applies_to_service(self):
+        from catprinter import i18n, statuspage
+        svc = temp_service(self, language="en")
+        self.assertEqual(i18n.current(), "en")
+        svc.update_settings({"language": "de"})
+        self.assertEqual(statuspage.status_dict(svc)["lang"], "de")
+
+
 class ReplaceRetryTest(unittest.TestCase):
     def test_retries_while_locked(self):
         # Virenscanner sperrt kurz: die ersten zwei Versuche scheitern

@@ -12,7 +12,8 @@ import webbrowser
 import pystray
 from PIL import Image, ImageDraw
 
-from . import netshare
+from . import i18n, netshare
+from .i18n import t
 from .pages import short_test_page
 from .server import CONFIG_DIR, CONFIG_FILE, load_config, save_config, serve
 
@@ -21,7 +22,10 @@ log = logging.getLogger("tray")
 LOG_FILE = os.path.join(CONFIG_DIR, "server.log")
 
 COLORS = {"ready": (46, 160, 67), "printing": (31, 111, 235), "cooling": (224, 150, 20), "error": (218, 54, 51)}
-LABELS = {"ready": "Bereit", "printing": "Druckt …", "cooling": "Zu heiß – kühlt ab …", "error": "Fehler"}
+
+
+def label(state):
+    return t("label_" + state)
 
 
 def make_icon(state):
@@ -90,17 +94,17 @@ class TrayApp:
             self.service.stop()
             self.httpd = self.service = None
 
-    def restart(self, message="Einstellungen neu geladen."):
+    def restart(self, message=None):
         log.info("Server wird neu gestartet (Einstellungen neu laden)")
         self.stop_server()
         try:
             self.start_server()
         except OSError as e:
-            self.set_state("error", f"Port belegt: {e}")
-            self.icon.notify("Server konnte nicht neu starten – Port belegt.", "Cat Printer")
+            self.set_state("error", str(e))
+            self.icon.notify(t("restart_failed"), "Cat Printer")
             return
         self.set_state("ready", "")
-        self.icon.notify(message, "Cat Printer")
+        self.icon.notify(message or t("settings_reloaded"), "Cat Printer")
 
     def _share_changed(self, enabled):
         if enabled and not netshare.firewall_ok():
@@ -108,11 +112,9 @@ class TrayApp:
             # Einmalig: Firewall für private Netzwerke öffnen (Windows fragt nach Adminrechten)
             _elevated(netshare.firewall_script())
             if not netshare.firewall_ok():
-                self.icon.notify("Firewall-Regel wurde nicht angelegt (Adminrechte abgelehnt?) – "
-                                 "Handys erreichen den Drucker dann nicht.", "Cat Printer")
-        name = self.cfg.get("printer_name", "Cat Printer")
-        self.restart(f"Im Heimnetz freigegeben – auf dem Handy als „{name} @ {socket.gethostname()}“ wählbar."
-                     if enabled else "Netzwerkfreigabe ausgeschaltet.")
+                self.icon.notify(t("firewall_failed"), "Cat Printer")
+        name = f"{self.cfg.get('printer_name', 'Cat Printer')} @ {socket.gethostname()}"
+        self.restart(t("shared_on", name=name) if enabled else t("shared_off"))
 
     # ------------------------------------------------------------ Ereignisse
 
@@ -121,51 +123,48 @@ class TrayApp:
             self._quit()
         elif event == "share_changed":
             threading.Thread(target=self._share_changed, args=(data["enabled"],), daemon=True).start()
+        elif event == "settings":
+            if "language" in data.get("changes", {}):
+                self.set_state(self.state, self.detail)  # Menü und Tooltip in der neuen Sprache
         elif event == "job_started":
             self.set_state("printing", data["job"].name)
         elif event == "hot":
-            self.set_state("cooling", "Druckkopf zu heiß")
-            self.icon.notify("Der Druckkopf ist zu heiß (viele dunkle Flächen am Stück). "
-                             + ("Der nächste Druck startet, sobald er abgekühlt ist – meist nach 1–2 Minuten."
-                                if data.get("waiting") else
-                                "Der Drucker pausiert kurz und druckt dann von selbst weiter."),
-                             "Cat Printer kühlt ab")
+            self.set_state("cooling", "")
+            self.icon.notify(t("hot_text") + (t("hot_waiting") if data.get("waiting") else t("hot_paused")),
+                             t("hot_title"))
         elif event == "cooled":
             self.set_state("printing", "")
         elif event == "job_done":
             self.set_state("ready", "")
         elif event == "job_failed":
             self.set_state("error", data["error"])
-            self.icon.notify(f"„{data['job'].name}“ wurde nicht gedruckt.\n{_short(data['error'])}",
-                             "Druck fehlgeschlagen")
+            self.icon.notify(t("print_failed", name=data["job"].name, err=_short(data["error"])),
+                             t("print_failed_title"))
         elif event == "status":
             if data.get("quiet"):
                 self.set_state(self.state, self.detail)  # nur Tooltip/Menü mit neuem Akkustand
             else:
                 self.set_state("ready", "")
-                self.icon.notify(f"Akku: {self.battery_text(short=True)}", "Cat Printer")
+                self.icon.notify(f"{t('battery')}: {self.battery_text(short=True)}", "Cat Printer")
         elif event == "status_failed":
             self.set_state("error", data["error"])
-            self.icon.notify(_short(data["error"]), "Drucker nicht erreichbar")
+            self.icon.notify(_short(data["error"]), t("unreachable_title"))
         elif event == "battery":
             self.set_state(self.state, self.detail)
             if data["level"] == "critical":
-                self.icon.notify(f"Akku fast leer ({data['percent']} %) – bitte jetzt per USB laden. "
-                                 "Drucke werden blass, der Drucker kann sich bald abschalten.",
-                                 "Cat Printer: Akku fast leer")
+                self.icon.notify(t("battery_critical_text", percent=data["percent"]), t("battery_critical_title"))
             else:
-                self.icon.notify(f"Akku schwach ({data['percent']} %) – bitte bald per USB laden, "
-                                 "sonst werden Drucke blasser.", "Cat Printer: Akku schwach")
+                self.icon.notify(t("battery_low_text", percent=data["percent"]), t("battery_low_title"))
         elif event == "battery_full":
             self.set_state(self.state, self.detail)
-            self.icon.notify("Der Akku ist voll geladen – das USB-Kabel kann ab.", "Cat Printer")
+            self.icon.notify(t("battery_full_text"), "Cat Printer")
         elif event in ("battery_charging", "battery_unplugged"):
             self.set_state(self.state, self.detail)  # Tooltip/Menü: "lädt …" bzw. wieder Prozent
 
     def set_state(self, state, detail):
         self.state, self.detail = state, detail
         self.icon.icon = make_icon(state)
-        self.icon.title = f"Cat Printer – {LABELS[state]} · Akku {self.battery_text(short=True)}"[:127]
+        self.icon.title = f"Cat Printer – {label(state)} · {t('battery')} {self.battery_text(short=True)}"[:127]
         self.icon.update_menu()
 
     # ------------------------------------------------------------ Menü
@@ -177,47 +176,60 @@ class TrayApp:
     def battery_text(self, short=False):
         b = self.service.battery if self.service else {}
         if not b:
-            return "unbekannt" if short else "Akku: noch nicht gemessen"
+            return t("battery_unknown") if short else f"{t('battery')}: {t('battery_not_measured')}"
         if b.get("charging"):
-            text = "voll (am Ladekabel)" if b.get("full") else "lädt …"
-            return text if short else f"Akku: {text}"
-        text = f"{b['percent']} % ({b['volts']:.2f} V)".replace(".", ",")
+            text = t("battery_charged") if b.get("full") else t("battery_charging")
+            return text if short else f"{t('battery')}: {text}"
+        text = f"{b['percent']} % ({i18n.volts(b['volts'])})"
         if b["level"] == "critical":
-            text += " – fast leer!"
+            text += " – " + t("battery_almost_empty")
         elif b["level"] == "low":
-            text += " – schwach"
-        return text if short else f"Akku: {text}"
+            text += " – " + t("battery_low_suffix")
+        return text if short else f"{t('battery')}: {text}"
 
     def status_text(self):
-        text = f"Status: {LABELS[self.state]}"
+        text = f"{t('status')}: {label(self.state)}"
         if self.detail:
             text += f" – {_short(self.detail, 60)}"
         return text
 
+    def _set_language(self, value):
+        if self.service:
+            self.service.update_settings({"language": value})  # meldet "settings" -> Menü neu
+            self.icon.notify(t("language_changed"), "Cat Printer")
+
     def _menu(self):
         Item = pystray.MenuItem
+        current = lambda value: (lambda _i: (self.cfg.get("language", "auto") if self.service else "auto") == value)
+        language_menu = pystray.Menu(
+            Item(lambda _i: t("menu_language_auto"), lambda: self._set_language("auto"),
+                 checked=current("auto"), radio=True),
+            Item("Deutsch", lambda: self._set_language("de"), checked=current("de"), radio=True),
+            Item("English", lambda: self._set_language("en"), checked=current("en"), radio=True),
+        )
         return pystray.Menu(
             Item(lambda _i: self.status_text(), None, enabled=False),
             Item(lambda _i: self.battery_text(), None, enabled=False),
             pystray.Menu.SEPARATOR,
-            Item("Testseite drucken", self._test_page),
-            Item("Akkustand prüfen", lambda: self.service and self.service.refresh_status()),
+            Item(lambda _i: t("menu_test_page"), self._test_page),
+            Item(lambda _i: t("menu_check_battery"), lambda: self.service and self.service.refresh_status()),
             pystray.Menu.SEPARATOR,
-            Item("Statusseite öffnen", self._open_status, default=True),
-            Item("Log öffnen", lambda: _notepad(LOG_FILE)),
-            Item("Einstellungen bearbeiten", lambda: _notepad(CONFIG_FILE)),
-            Item("Server neu starten", lambda: threading.Thread(target=self.restart, daemon=True).start()),
-            Item("Windows-Drucker einrichten …", lambda: threading.Thread(
+            Item(lambda _i: t("menu_status_page"), self._open_status, default=True),
+            Item(lambda _i: t("menu_log"), lambda: _notepad(LOG_FILE)),
+            Item(lambda _i: t("menu_settings"), lambda: _notepad(CONFIG_FILE)),
+            Item(lambda _i: t("menu_language"), language_menu),
+            Item(lambda _i: t("menu_restart"), lambda: threading.Thread(target=self.restart, daemon=True).start()),
+            Item(lambda _i: t("menu_setup_printer"), lambda: threading.Thread(
                 target=self._setup_printer, daemon=True).start(), visible=lambda _i: self.printer_missing),
             pystray.Menu.SEPARATOR,
-            Item("Beenden", self._quit),
+            Item(lambda _i: t("menu_quit"), self._quit),
         )
 
     def _test_page(self):
         if not self.service:
             return
-        info = f"Akku {self.battery_text(short=True)}" if self.volts else ""
-        self.service.print_image("Testseite", short_test_page(info))
+        info = t("battery_info", v=self.battery_text(short=True)) if self.volts else ""
+        self.service.print_image(t("test_page"), short_test_page(info))
 
     def _open_status(self):
         webbrowser.open(f"http://{self.cfg['http_host']}:{self.cfg['http_port']}/")
@@ -238,10 +250,7 @@ class TrayApp:
 
     def _setup_printer(self, first_time=False):
         from .installer import IDYES, MB_ICONQUESTION, MB_YESNO, _box, add_printer
-        text = ("Der Windows-Drucker „Cat Printer“ fehlt noch – ohne ihn taucht der Drucker "
-                "nicht im Druckdialog auf.\n\nJetzt anlegen? Windows fragt dafür nach Adminrechten.")
-        if first_time:
-            text += "\n\n(Später geht das auch über das Tray-Menü.)"
+        text = t("printer_missing") + (t("printer_missing_later") if first_time else "")
         if _box(text, MB_YESNO | MB_ICONQUESTION) != IDYES:
             if first_time:
                 self.cfg["printer_setup_declined"] = True  # nicht bei jedem Start erneut fragen
@@ -250,9 +259,9 @@ class TrayApp:
         if add_printer():
             self.printer_missing = False
             self.icon.update_menu()
-            self.icon.notify("Drucker „Cat Printer“ ist eingerichtet.", "Cat Printer")
+            self.icon.notify(t("printer_added"), "Cat Printer")
         else:
-            self.icon.notify("Drucker wurde nicht angelegt (Adminrechte abgelehnt?).", "Cat Printer")
+            self.icon.notify(t("printer_not_added"), "Cat Printer")
 
     # ------------------------------------------------------------ Start
 
@@ -261,16 +270,18 @@ class TrayApp:
             self.start_server()
         except OSError:
             cfg = load_config()
+            i18n.set_language(cfg.get("language", "auto"))
             url = f"http://{cfg['http_host']}:{cfg['http_port']}/"
             if _server_answers(url):
                 # Läuft schon (z. B. per Autostart): einfach die Statusseite öffnen
                 log.info("Server läuft bereits – öffne Statusseite")
                 webbrowser.open(url)
                 return 0
-            _message_box(f"Port {cfg['http_port']} ist von einem anderen Programm belegt.\n"
-                         "Der Cat-Printer-Server kann nicht starten.")
+            _message_box(t("port_in_use", port=cfg["http_port"]))
             return 1
         log.info("Tray gestartet")
+        # Tooltip in der eingestellten Sprache (update_menu erst, wenn das Symbol läuft)
+        self.icon.title = f"Cat Printer – {label('ready')} · {t('battery')} {self.battery_text(short=True)}"[:127]
 
         def setup(icon):
             icon.visible = True

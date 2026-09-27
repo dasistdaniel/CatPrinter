@@ -126,10 +126,16 @@ together with a cat icon in the notification area. The dot shows the state:
 
 Right-click menu: status and battery level, *Print test page*, *Check
 battery*, *Open status page* (also on double-click), *Open log*, *Edit
-settings*, *Restart server* (reloads `config.json`), *Quit*.
+settings*, *Language*, *Restart server* (reloads `config.json`), *Quit*.
 
 Windows notifications appear when a print fails (e.g. printer off), when the
 print head is too hot, and for the battery (see below).
+
+**Language:** tray icon, notifications, status page, error messages, installer
+and printed test pages are available in **German and English**. By default
+the language follows Windows; switch it in the tray menu (*Language*), with
+the DE | EN switch on the status page or in its settings. (The log file stays
+German.)
 
 ### Battery warning
 
@@ -261,6 +267,7 @@ tray menu afterwards.
 | `photo_brightness` | `0` | Photo brightness in percent (−30 … +50), photos only |
 | `battery_check_minutes` | `30` | Check the battery automatically every N minutes while idle (0 = off) |
 | `battery_warn_percent` | `15` | Warn when the battery drops to this level |
+| `language` | `"auto"` | `auto` (like Windows), `de` or `en` |
 | `http_host` / `http_port` | `127.0.0.1` / `631` | Address of the IPP server |
 | `printer_name` | `"Cat Printer"` | Name reported to Windows |
 | `uuid` | random | Printer identity – don't change it, or Windows sees a new device |

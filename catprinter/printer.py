@@ -8,6 +8,8 @@ import serial
 from PIL import Image, ImageChops, ImageFilter, ImageOps
 from serial.tools import list_ports
 
+from .i18n import t
+
 log = logging.getLogger("printer")
 
 WIDTH = 384            # Druckpunkte pro Zeile (48 mm bei 203 dpi)
@@ -191,7 +193,7 @@ def build_job(images, feed_mm=15, density=DEFAULT_DENSITY, init=False):
             data += bytes(feed_rows * bpr)
             rows += feed_rows
         if rows > MAX_ROWS:
-            raise PrinterError(f"Seite zu lang ({rows} Zeilen, maximal {MAX_ROWS})")
+            raise PrinterError(t("page_too_long", rows=rows, max=MAX_ROWS))
         out += _gs_v0(data, rows)
     return bytes(out)
 
@@ -210,7 +212,7 @@ class Printer:
             return self.port
         port = find_port(self.name_prefix)
         if not port:
-            raise PrinterError(f"Kein gekoppelter Drucker '{self.name_prefix}*' mit COM-Port gefunden")
+            raise PrinterError(t("no_printer", prefix=self.name_prefix))
         log.info("Drucker gefunden auf %s", port)
         self.port = port
         return port
@@ -224,8 +226,7 @@ class Printer:
                 break
             except serial.SerialException as e:
                 if attempt == attempts:
-                    raise PrinterError(f"{port} lässt sich nicht öffnen (Drucker aus oder "
-                                       f"mit dem Handy verbunden?): {e}") from e
+                    raise PrinterError(t("port_open_failed", port=port, err=e)) from e
                 log.info("Verbindung fehlgeschlagen, neuer Versuch in %.0f s", retry_delay)
                 time.sleep(retry_delay)
         time.sleep(0.8)
@@ -263,7 +264,7 @@ class Printer:
             self.last_status = _query_status(ser)
         except serial.SerialException as e:
             self.close()
-            raise PrinterError(f"Verbindung zum Drucker verloren: {e}") from e
+            raise PrinterError(t("connection_lost", err=e)) from e
         return self.last_status
 
     def print_images(self, images, feed_mm=15, density=DEFAULT_DENSITY, notify=None):
@@ -295,7 +296,7 @@ class Printer:
             ser = self._ready_connection(notify)
         except serial.SerialException as e:
             self.close()
-            raise PrinterError(f"Keine Verbindung zum Drucker: {e}") from e
+            raise PrinterError(t("no_connection", err=e)) from e
         try:
             start = time.monotonic()
             slowest = 0.0
@@ -320,7 +321,7 @@ class Printer:
                      elapsed, len(job) / 1024 / max(elapsed, 0.001), slowest * 1000)
         except serial.SerialException as e:
             self.close()
-            raise PrinterError(f"Verbindung während des Drucks abgebrochen: {e}") from e
+            raise PrinterError(t("connection_broken", err=e)) from e
         # Akkustand gleich über dieselbe Verbindung mitnehmen
         try:
             self.last_status = _query_status(ser) or self.last_status

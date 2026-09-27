@@ -124,11 +124,17 @@ aus. Der Punkt zeigt den Zustand: 🟢 bereit · 🔵 druckt · 🟠 zu heiß, k
 
 Rechtsklick-Menü: Status und Akkustand, *Testseite drucken*, *Akkustand
 prüfen*, *Statusseite öffnen* (auch per Doppelklick), *Log öffnen*,
-*Einstellungen bearbeiten*, *Server neu starten* (lädt `config.json` neu),
-*Beenden*.
+*Einstellungen bearbeiten*, *Sprache*, *Server neu starten* (lädt
+`config.json` neu), *Beenden*.
 
 Windows-Benachrichtigungen erscheinen, wenn ein Druck fehlschlägt (z. B.
 Drucker aus), wenn der Druckkopf zu heiß ist und beim Akku (siehe unten).
+
+**Sprache:** Tray-Symbol, Benachrichtigungen, Statusseite, Fehlermeldungen,
+Installer und gedruckte Testseiten gibt es auf **Deutsch und Englisch**.
+Standardmäßig richtet sich die Sprache nach Windows; umstellen lässt sie sich
+im Tray-Menü (*Sprache*), mit dem DE | EN-Schalter auf der Statusseite oder in
+deren Einstellungen. (Die Log-Datei bleibt deutsch.)
 
 ### Akkuwarnung
 
@@ -263,6 +269,7 @@ starten* wählen):
 | `photo_brightness` | `0` | Foto-Helligkeit in Prozent (−30 … +50), nur Fotos |
 | `battery_check_minutes` | `30` | Akku alle N Minuten automatisch prüfen, wenn nichts gedruckt wird (0 = aus) |
 | `battery_warn_percent` | `15` | Ab diesem Ladestand warnen |
+| `language` | `"auto"` | `auto` (wie Windows), `de` oder `en` |
 | `http_host` / `http_port` | `127.0.0.1` / `631` | Adresse des IPP-Servers |
 | `printer_name` | `"Cat Printer"` | Name gegenüber Windows |
 | `uuid` | zufällig | Identität des Druckers – nicht ändern, sonst hält Windows ihn für ein neues Gerät |

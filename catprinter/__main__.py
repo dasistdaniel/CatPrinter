@@ -7,6 +7,8 @@ import threading
 
 from PIL import Image
 
+from . import i18n
+from .i18n import t
 from .pages import calibration_page, test_page
 from .printer import DEFAULT_DENSITY, Printer, PrinterError, build_job, prepare
 from .server import CONFIG_DIR, CONFIG_FILE, load_config, serve
@@ -51,10 +53,9 @@ def main():
             print("install/uninstall gibt es nur in der exe (build.ps1). "
                   "Für die Python-Variante: autostart.ps1 und Add-Printer, siehe README.")
             return 1
+        i18n.set_language(cfg.get("language", "auto"))
         if portable:
-            installer._box("Das ist die portable Variante – sie wird nicht installiert.\n"
-                           "Zum Installieren die Datei „portable“ neben der exe entfernen "
-                           "bzw. die exe umbenennen.")
+            installer._box(t("portable_no_install"))
             return 1
         try:
             if args.command == "uninstall":
@@ -65,8 +66,8 @@ def main():
             args.command = "tray"  # "Nein" im Dialog: ohne Installation starten
         except Exception as e:  # noqa: BLE001 – dem Nutzer zeigen statt still abzubrechen
             logging.exception("%s fehlgeschlagen", args.command)
-            installer._box(f"Fehler bei der {'Installation' if args.command == 'install' else 'Deinstallation'}:"
-                           f"\n{e}\n\nDetails im Log: {CONFIG_DIR}", installer.MB_ICONWARNING)
+            installer._box(t("install_error" if args.command == "install" else "uninstall_error",
+                             err=e, dir=CONFIG_DIR), installer.MB_ICONWARNING)
             return 1
 
     if args.command == "tray":
