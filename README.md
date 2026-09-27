@@ -229,7 +229,7 @@ require a custom header, so other websites can neither read them nor print.
 | `python -m catprinter test` | Print a test page directly (bypasses Windows) |
 | `python -m catprinter image picture.png` | Print an image file directly |
 | `python -m catprinter calibrate 15 25 40` | Print black test blocks at several density levels |
-| http://127.0.0.1:631/ | Status page: state, battery, recent jobs, editable settings, buttons for test page and battery check (updates live, light/dark mode) |
+| http://127.0.0.1:631/ | Status page: state, battery, recent jobs, editable settings, buttons for test page and battery check (updates live, light/dark mode, **German / English** switch top right) |
 
 Options: `--port COMx` (skip auto-detection), `--density N`, `--mode auto|text|photo`,
 `--log-file FILE`.

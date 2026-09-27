@@ -341,6 +341,28 @@ class NetworkAccessTest(unittest.TestCase):
         self.assertEqual(self.ipp_attrs()[0], 403)
 
 
+class ReplaceRetryTest(unittest.TestCase):
+    def test_retries_while_locked(self):
+        # Virenscanner sperrt kurz: die ersten zwei Versuche scheitern
+        from catprinter import history
+        calls = []
+        real = os.replace
+
+        def flaky(src, dst):
+            calls.append(1)
+            if len(calls) < 3:
+                raise PermissionError(13, "gesperrt")
+            real(src, dst)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            src, dst = os.path.join(tmp, "a"), os.path.join(tmp, "b")
+            open(src, "w").close()
+            with unittest.mock.patch.object(history.os, "replace", flaky):
+                history.replace_with_retry(src, dst, delay=0.01)
+            self.assertTrue(os.path.exists(dst))
+            self.assertEqual(len(calls), 3)
+
+
 class HistoryTest(unittest.TestCase):
     def test_limit_and_ids(self):
         from catprinter.history import History

@@ -18,6 +18,19 @@ HISTORY_LIMIT = 30
 _ID = re.compile(r"^[0-9]{13}-[0-9a-f]{6}$")
 
 
+def replace_with_retry(src, dst, attempts=20, delay=0.1):
+    """Umbenennen mit Wiederholung: Virenscanner sperren frisch geschriebene Dateien oft kurz
+    (PermissionError beim Umbenennen des Ordners) – sonst fehlte der Eintrag still im Verlauf."""
+    for attempt in range(attempts):
+        try:
+            os.replace(src, dst)
+            return
+        except PermissionError:
+            if attempt == attempts - 1:
+                raise
+            time.sleep(delay)
+
+
 class History:
     def __init__(self, directory, limit=HISTORY_LIMIT):
         self.directory = directory
@@ -44,7 +57,7 @@ class History:
                     "quality": quality, "network": bool(network), "state": "pending"}
             with open(os.path.join(tmp, "meta.json"), "w", encoding="utf-8") as f:
                 json.dump(meta, f)
-            os.replace(tmp, os.path.join(self.directory, hid))
+            replace_with_retry(tmp, os.path.join(self.directory, hid))
             self._prune()
         return hid
 
@@ -59,7 +72,7 @@ class History:
             meta["state"] = state
             with open(path + ".tmp", "w", encoding="utf-8") as f:
                 json.dump(meta, f)
-            os.replace(path + ".tmp", path)
+            replace_with_retry(path + ".tmp", path)
 
     def list(self):
         entries = []

@@ -231,7 +231,7 @@ Kennung – fremde Webseiten können also weder mitlesen noch drucken.
 | `python -m catprinter test` | Testseite direkt drucken (ohne Windows) |
 | `python -m catprinter image bild.png` | Bild direkt drucken |
 | `python -m catprinter calibrate 15 25 40` | Schwarzfelder mit verschiedenen Druckdichten drucken |
-| http://127.0.0.1:631/ | Statusseite: Zustand, Akku, letzte Aufträge, änderbare Einstellungen, Knöpfe für Testseite und Akkuprüfung (aktualisiert sich live, hell/dunkel) |
+| http://127.0.0.1:631/ | Statusseite: Zustand, Akku, letzte Aufträge, änderbare Einstellungen, Knöpfe für Testseite und Akkuprüfung (aktualisiert sich live, hell/dunkel, Umschalter **Deutsch / Englisch** oben rechts) |
 
 Optionen: `--port COMx`, `--density N`, `--mode auto|text|photo`, `--log-file DATEI`.
 

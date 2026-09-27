@@ -15,7 +15,7 @@ from PIL import Image
 
 from . import ipp, netshare, pwg, statuspage
 from .pages import calibration_page, short_test_page
-from .history import History
+from .history import History, replace_with_retry
 from .printer import (DEFAULT_DENSITY, DPI, IDLE_CLOSE, MODES, Printer, battery_percent, battery_volts, PrinterError, is_photo_page, photo_brightness,
                       prepare, scale_to_width, windows_tone)
 
@@ -154,7 +154,7 @@ def save_config(cfg, path=None):
     tmp = path + ".tmp"
     with open(tmp, "w", encoding="utf-8") as f:
         json.dump(cfg, f, indent=2)
-    os.replace(tmp, path)  # nie eine halb geschriebene Datei hinterlassen
+    replace_with_retry(tmp, path)  # nie eine halb geschriebene Datei hinterlassen
 
 
 class Job:
@@ -306,7 +306,7 @@ class PrintService:
             with open(tmp, "w", encoding="utf-8") as f:
                 json.dump({"battery": self.battery, "last_check": self._last_check, "alert": self._battery_alert,
                            "full_notified": self._charge_full_notified}, f)
-            os.replace(tmp, self._battery_file)
+            replace_with_retry(tmp, self._battery_file)
         except OSError:
             log.debug("Akkustand nicht gespeichert", exc_info=True)
 

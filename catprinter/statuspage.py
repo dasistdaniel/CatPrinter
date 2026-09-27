@@ -84,8 +84,15 @@ header { display: flex; align-items: center; gap: 16px; margin-bottom: 24px; }
 header svg { width: 56px; height: 56px; flex: none; }
 h1 { font-size: 24px; margin: 0; line-height: 1.2; }
 .sub { color: var(--muted); font-size: 13px; margin-top: 2px; }
+.head-right { margin-left: auto; display: flex; align-items: center; gap: 10px; }
+.lang { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+.lang button {
+  border: 0; border-radius: 0; padding: 4px 9px; font-size: 12px; font-weight: 600;
+  background: transparent; color: var(--muted);
+}
+.lang button.active { background: var(--neutral-bg); color: var(--text); }
 .pill {
-  margin-left: auto; display: inline-flex; align-items: center; gap: 8px;
+  display: inline-flex; align-items: center; gap: 8px;
   padding: 6px 14px; border-radius: 999px; font-weight: 600; font-size: 14px; white-space: nowrap;
 }
 .pill::before { content: ""; width: 9px; height: 9px; border-radius: 50%; background: currentColor; }
@@ -230,7 +237,7 @@ footer { color: var(--muted); font-size: 12px; margin-top: 24px; text-align: cen
 @media (max-width: 600px) {
   .grid, .twocol { grid-template-columns: 1fr; }
   header { flex-wrap: wrap; }
-  .pill { margin-left: 0; }
+  .head-right { margin-left: 0; }
 }
 </style>
 </head>
@@ -247,172 +254,299 @@ footer { color: var(--muted); font-size: 12px; margin-top: 24px; text-align: cen
     </svg>
     <div>
       <h1 id="name">Cat Printer</h1>
-      <div class="sub">Bluetooth-Thermodrucker · 58 mm</div>
+      <div class="sub" data-i18n="subtitle"></div>
     </div>
-    <span id="pill" class="pill offline">Verbinde …</span>
+    <div class="head-right">
+      <span id="pill" class="pill offline" data-i18n="connecting"></span>
+      <div class="lang" role="group" aria-label="Sprache / Language">
+        <button type="button" data-lang="de">DE</button><button type="button" data-lang="en">EN</button>
+      </div>
+    </div>
   </header>
 
   <div id="alert" class="alert" hidden></div>
 
   <div class="grid">
     <div class="card">
-      <div class="label">Akku</div>
+      <div class="label" data-i18n="battery"></div>
       <div class="value" id="volts">–</div>
       <div class="battery-bar"><div id="battery-fill"></div></div>
-      <div class="hint" id="volts-hint">noch nicht gemessen</div>
+      <div class="hint" id="volts-hint" data-i18n="notMeasured"></div>
     </div>
     <div class="card">
-      <div class="label">Verbindung</div>
+      <div class="label" data-i18n="connection"></div>
       <div class="value" id="port">–</div>
-      <div class="hint" id="firmware">Bluetooth (seriell)</div>
+      <div class="hint" id="firmware"></div>
     </div>
     <div class="card">
-      <div class="label">Gedruckt</div>
+      <div class="label" data-i18n="printed"></div>
       <div class="value" id="count">0</div>
-      <div class="hint" id="uptime">seit dem Start</div>
+      <div class="hint" id="uptime"></div>
     </div>
   </div>
 
   <div class="netinfo" id="netinfo" hidden>
-    <strong>Im Heimnetz freigegeben</strong> <span id="net-text"></span>
+    <strong data-i18n="sharedOnNetwork"></strong> <span id="net-text"></span>
     <div class="net-warn" id="net-warn" hidden></div>
   </div>
 
   <div class="actions">
-    <button class="primary" id="btn-test">Testseite drucken</button>
-    <button id="btn-battery">Akku prüfen</button>
+    <button class="primary" id="btn-test" data-i18n="printTestPage"></button>
+    <button id="btn-battery" data-i18n="checkBattery"></button>
   </div>
 
-  <h2>Druckaufträge</h2>
-  <div class="card jobs" id="jobs"><div class="empty">Noch keine Aufträge</div></div>
+  <h2 data-i18n="jobs"></h2>
+  <div class="card jobs" id="jobs"></div>
 
   <div class="section-head">
-    <h2>Verlauf</h2>
-    <button type="button" class="small" id="btn-clear" hidden>Alle löschen</button>
+    <h2 data-i18n="history"></h2>
+    <button type="button" class="small" id="btn-clear" hidden data-i18n="deleteAll"></button>
   </div>
-  <div class="card" id="history">
-    <div class="empty">Der Verlauf ist ausgeschaltet – gedruckte Aufträge werden nicht gespeichert.<br>
-      <button type="button" class="link" id="btn-history-settings">In den Einstellungen einschalten</button></div>
-  </div>
+  <div class="card" id="history"></div>
 
   <dialog id="viewer">
     <div class="viewer-head">
       <div><div class="title" id="viewer-title"></div><div class="meta" id="viewer-meta"></div></div>
-      <button type="button" class="icon" id="viewer-close" aria-label="Schließen">✕</button>
+      <button type="button" class="icon" id="viewer-close" data-i18n-aria="close">✕</button>
     </div>
     <div class="viewer-pages" id="viewer-pages"></div>
     <div class="viewer-foot">
-      <span class="hint">Vorschau mit den aktuellen Einstellungen</span>
-      <button type="button" class="primary" id="viewer-reprint">Nochmal drucken</button>
+      <span class="hint" data-i18n="previewHint"></span>
+      <button type="button" class="primary" id="viewer-reprint" data-i18n="printAgain"></button>
     </div>
   </dialog>
 
   <details class="section" id="settings-section">
-  <summary><h2>Einstellungen</h2><span class="summary-hint">Dichte, Bildmodus, Vorschub, Verbindung</span></summary>
+  <summary><h2 data-i18n="settings"></h2><span class="summary-hint" data-i18n="settingsHint"></span></summary>
   <form class="card settings" id="settings" autocomplete="off">
     <div class="field">
-      <label for="f-density">Druckdichte</label>
+      <label for="f-density" data-i18n="density"></label>
       <div class="control">
         <input type="range" id="f-density" name="density" min="5" max="80" step="1">
         <output id="density-out">–</output>
-        <button type="button" id="btn-calibrate">Probe drucken</button>
+        <button type="button" id="btn-calibrate" data-i18n="printSample"></button>
       </div>
-      <p class="help">Heizstärke. Höher = dunkler, aber feine Details laufen eher zu. Getestet: 40. WalkPrint nutzt 25.</p>
+      <p class="help" data-i18n="densityHelp"></p>
     </div>
     <div class="field">
-      <label for="f-mode">Bildmodus</label>
+      <label for="f-mode" data-i18n="imageMode"></label>
       <select id="f-mode" name="image_mode">
-        <option value="auto">Automatisch – Text scharf, Fotos gerastert</option>
-        <option value="text">Text – harte Schwelle, alles gestochen scharf</option>
-        <option value="photo">Foto – alles gerastert</option>
+        <option value="auto" data-i18n="modeAuto"></option>
+        <option value="text" data-i18n="modeText"></option>
+        <option value="photo" data-i18n="modePhoto"></option>
       </select>
-      <p class="help">Gilt für Druckqualität „Normal“. „Entwurf“ druckt immer als Text, „Hoch“ immer als Foto.</p>
+      <p class="help" data-i18n="imageModeHelp"></p>
     </div>
     <div class="field">
-      <label for="f-bright">Foto-Helligkeit</label>
+      <label for="f-bright" data-i18n="photoBrightness"></label>
       <div class="control">
         <input type="range" id="f-bright" name="photo_brightness" min="-30" max="50" step="5">
         <output id="bright-out">0</output>
       </div>
-      <p class="help">Hellt die Mitteltöne von Fotos auf (Schwarz und Weiß bleiben). Auf Thermopapier laufen
-        die Punkte etwas aus, deshalb wirken Fotos oft dunkler als am Bildschirm. Text und Grafik sind nicht betroffen.
-        Mit „Nochmal drucken“ im Verlauf lässt sich der Wert gut vergleichen.</p>
+      <p class="help" data-i18n="photoBrightnessHelp"></p>
     </div>
     <div class="field">
-      <label for="f-feed">Vorschub nach dem Druck</label>
+      <label for="f-feed" data-i18n="feed"></label>
       <div class="control">
         <input type="number" id="f-feed" name="feed_mm" min="0" max="50" step="1"><span class="unit">mm</span>
       </div>
-      <p class="help">Damit das Ende über die Abreißkante kommt.</p>
+      <p class="help" data-i18n="feedHelp"></p>
     </div>
     <div class="field">
-      <label for="f-battery-check">Akku automatisch prüfen</label>
+      <label for="f-battery-check" data-i18n="batteryCheck"></label>
       <div class="control">
         <select id="f-battery-check" name="battery_check_minutes" style="width:auto">
-          <option value="0">aus</option>
-          <option value="15">alle 15 Minuten</option>
-          <option value="30">alle 30 Minuten</option>
-          <option value="60">jede Stunde</option>
-          <option value="120">alle 2 Stunden</option>
+          <option value="0" data-i18n="off"></option>
+          <option value="15" data-i18n="every15"></option>
+          <option value="30" data-i18n="every30"></option>
+          <option value="60" data-i18n="every60"></option>
+          <option value="120" data-i18n="every120"></option>
         </select>
-        <span class="unit">warnen ab</span>
+        <span class="unit" data-i18n="warnFrom"></span>
         <input type="number" id="f-battery-warn" name="battery_warn_percent" min="5" max="50" step="5"><span class="unit">%</span>
       </div>
-      <p class="help">Fragt den Ladestand ab, wenn gerade nichts gedruckt wird (ist der Drucker aus, passiert nichts).
-        Nach jedem Druck wird er ohnehin gemessen. Warnt einmal bei „schwach“ und einmal bei „fast leer“ (5 %),
-        und meldet, wenn der Akku wieder voll ist. Der Ladestand ist aus der Spannung geschätzt.</p>
+      <p class="help" data-i18n="batteryCheckHelp"></p>
     </div>
     <div class="field checks">
-      <label class="check"><input type="checkbox" id="f-rotate" name="rotate_180"> Um 180° drehen (vom Druckergesicht aus lesbar)</label>
-      <label class="check"><input type="checkbox" id="f-trim" name="trim_bottom"> Weißraum am Seitenende abschneiden</label>
+      <label class="check"><input type="checkbox" id="f-rotate" name="rotate_180"> <span data-i18n="rotate"></span></label>
+      <label class="check"><input type="checkbox" id="f-trim" name="trim_bottom"> <span data-i18n="trim"></span></label>
     </div>
     <div class="field">
-      <label class="check"><input type="checkbox" id="f-history" name="keep_history"> Verlauf: gedruckte Aufträge speichern</label>
-      <p class="help">Speichert eine Kopie jeder gedruckten Seite auf diesem PC
-        (<code>%APPDATA%\CatPrinterDriver\history</code>, höchstens 30 Aufträge), damit du sie ansehen und
-        nochmal drucken kannst. Standardmäßig aus. <strong>Beim Ausschalten wird der Verlauf gelöscht.</strong></p>
+      <label class="check"><input type="checkbox" id="f-history" name="keep_history"> <span data-i18n="keepHistory"></span></label>
+      <p class="help" data-i18n-html="keepHistoryHelp"></p>
     </div>
     <div class="field">
-      <label class="check"><input type="checkbox" id="f-share" name="share_network"> Im Heimnetz freigeben (Drucken vom Handy)</label>
-      <p class="help">Macht den Drucker für Handys und andere Geräte im selben WLAN sichtbar (Android:
-        „Standard-Druckdienst“). Nur Drucken ist aus dem Netz erreichbar – Statusseite, Einstellungen und
-        Verlauf bleiben auf diesem PC. Beim ersten Einschalten fragt Windows nach Adminrechten für die Firewall.
-        Jeder im Heimnetz kann dann drucken.</p>
-      <label class="check" style="margin-top:10px"><input type="checkbox" id="f-tone" name="match_windows_tone"> Fotos vom Handy aufhellen wie am PC</label>
-      <p class="help">Windows hellt beim Drucken die Schatten von Fotos auf, Handys nicht – ohne Ausgleich
-        werden Handy-Fotos deutlich dunkler. Betrifft nur Fotos, nicht Text und Grafik.</p>
+      <label class="check"><input type="checkbox" id="f-share" name="share_network"> <span data-i18n="shareNetwork"></span></label>
+      <p class="help" data-i18n="shareNetworkHelp"></p>
+      <label class="check" style="margin-top:10px"><input type="checkbox" id="f-tone" name="match_windows_tone"> <span data-i18n="matchTone"></span></label>
+      <p class="help" data-i18n="matchToneHelp"></p>
     </div>
     <details class="field">
-      <summary>Verbindung</summary>
+      <summary data-i18n="connection"></summary>
       <div class="twocol">
         <div>
-          <label for="f-port">COM-Port</label>
-          <input type="text" id="f-port" name="com_port" placeholder="automatisch">
+          <label for="f-port" data-i18n="comPort"></label>
+          <input type="text" id="f-port" name="com_port" data-i18n-placeholder="automatic">
         </div>
         <div>
-          <label for="f-btname">Bluetooth-Name beginnt mit</label>
+          <label for="f-btname" data-i18n="btName"></label>
           <input type="text" id="f-btname" name="bluetooth_name">
         </div>
       </div>
-      <p class="help">COM-Port leer lassen, um den Drucker automatisch über seinen Bluetooth-Namen zu finden.
-        Druckeradresse für Windows: <code id="url">–</code></p>
+      <p class="help"><span data-i18n="connectionHelp"></span> <code id="url">–</code></p>
     </details>
     <div class="save-row">
       <span id="save-msg" class="save-msg" role="status"></span>
-      <button type="button" id="btn-reset">Verwerfen</button>
-      <button type="submit" class="primary" id="btn-save">Speichern</button>
+      <button type="button" id="btn-reset" data-i18n="discard"></button>
+      <button type="submit" class="primary" id="btn-save" data-i18n="save"></button>
     </div>
   </form>
   </details>
 
-  <footer>CatPrinterDriver · aktualisiert sich automatisch · Änderungen gelten sofort und werden in config.json gespeichert</footer>
+  <footer data-i18n="footer"></footer>
 </main>
 <script>
 const $ = (id) => document.getElementById(id);
-const STATE = { ready: "Bereit", printing: "Druckt …", cooling: "Zu heiß – kühlt ab …", error: "Fehler" };
-const JOB = { done: "Gedruckt", printing: "Druckt", pending: "Wartet", failed: "Fehlgeschlagen", canceled: "Abgebrochen" };
+
+// ---------------------------------------------------------------- Texte (Deutsch / English)
+const I18N = {
+  de: {
+    subtitle: "Bluetooth-Thermodrucker · 58 mm", connecting: "Verbinde …", serverDown: "Server nicht erreichbar",
+    ready: "Bereit", printing: "Druckt …", cooling: "Zu heiß – kühlt ab …", error: "Fehler",
+    jobDone: "Gedruckt", jobPrinting: "Druckt", jobPending: "Wartet", jobFailed: "Fehlgeschlagen", jobCanceled: "Abgebrochen",
+    battery: "Akku", connection: "Verbindung", printed: "Gedruckt", notMeasured: "noch nicht gemessen",
+    measuring: "wird gemessen …", measuredAt: "gemessen {0}", battCritical: "fast leer – jetzt per USB laden ({0})",
+    battLow: "schwach – bitte bald laden ({0})", charging: "lädt …", full: "voll", atCharger: "am Ladekabel · ",
+    chargingVoltage: "Ladespannung {0} · ", automaticPort: "Automatisch", bluetoothSerial: "Bluetooth (seriell)",
+    portSearched: "COM-Port wird beim ersten Druck gesucht", since: "seit {0}", minutes: "{0} Min.",
+    hours: "{0} Std.", days: "{0} Tagen", lastError: "Letzter Fehler: {0}",
+    sharedOnNetwork: "Im Heimnetz freigegeben", netSetup: "– wird eingerichtet …",
+    netHow: "· Handy im selben WLAN → Drucken → Drucker „{0}“ wählen · {1}", netNoAddr: "· keine Heimnetz-Adresse gefunden",
+    netFirewall: "Firewall-Regel fehlt – im Einstellungsbereich die Freigabe aus- und wieder einschalten.",
+    netPublic: "Ein Netzwerk ist als „öffentlich“ eingestuft – dort erreichen Handys den Drucker nicht (Windows: Netzwerkprofil „Privat“).",
+    netAdvert: "Bekanntgabe im Netz fehlgeschlagen: {0}", unknown: "unbekannt",
+    printTestPage: "Testseite drucken", checkBattery: "Akku prüfen", jobs: "Druckaufträge", noJobs: "Noch keine Aufträge",
+    page: "Seite", pages: "Seiten", history: "Verlauf", deleteAll: "Alle löschen", close: "Schließen",
+    previewHint: "Vorschau mit den aktuellen Einstellungen", printAgain: "Nochmal drucken", delete: "Löschen",
+    view: "Ansehen", preview: "Vorschau", historyOff: "Der Verlauf ist ausgeschaltet – gedruckte Aufträge werden nicht gespeichert.",
+    enableInSettings: "In den Einstellungen einschalten", historyEmpty: "Noch nichts gespeichert – der nächste Druck erscheint hier.",
+    confirmClear: "Alle gespeicherten Aufträge löschen?",
+    confirmHistoryOff: "Verlauf ausschalten? Alle {0} gespeicherten Aufträge werden gelöscht.",
+    settings: "Einstellungen", settingsHint: "Dichte, Bildmodus, Vorschub, Akku, Verbindung",
+    density: "Druckdichte", printSample: "Probe drucken",
+    densityHelp: "Heizstärke. Höher = dunkler, aber feine Details laufen eher zu. Getestet: 40. WalkPrint nutzt 25.",
+    imageMode: "Bildmodus", modeAuto: "Automatisch – Text scharf, Fotos gerastert",
+    modeText: "Text – harte Schwelle, alles gestochen scharf", modePhoto: "Foto – alles gerastert",
+    imageModeHelp: "Gilt für Druckqualität „Normal“. „Entwurf“ druckt immer als Text, „Hoch“ immer als Foto.",
+    photoBrightness: "Foto-Helligkeit",
+    photoBrightnessHelp: "Hellt die Mitteltöne von Fotos auf (Schwarz und Weiß bleiben). Auf Thermopapier laufen die Punkte etwas aus, deshalb wirken Fotos oft dunkler als am Bildschirm. Text und Grafik sind nicht betroffen. Mit „Nochmal drucken“ im Verlauf lässt sich der Wert gut vergleichen.",
+    feed: "Vorschub nach dem Druck", feedHelp: "Damit das Ende über die Abreißkante kommt.",
+    batteryCheck: "Akku automatisch prüfen", off: "aus", every15: "alle 15 Minuten", every30: "alle 30 Minuten",
+    every60: "jede Stunde", every120: "alle 2 Stunden", warnFrom: "warnen ab",
+    batteryCheckHelp: "Fragt den Ladestand ab, wenn gerade nichts gedruckt wird (ist der Drucker aus, passiert nichts). Nach jedem Druck wird er ohnehin gemessen. Warnt einmal bei „schwach“ und einmal bei „fast leer“ (5 %), erkennt das Laden am USB-Kabel und meldet, wenn der Akku voll ist. Der Ladestand ist aus der Spannung geschätzt.",
+    rotate: "Um 180° drehen (vom Druckergesicht aus lesbar)", trim: "Weißraum am Seitenende abschneiden",
+    keepHistory: "Verlauf: gedruckte Aufträge speichern",
+    keepHistoryHelp: "Speichert eine Kopie jeder gedruckten Seite auf diesem PC (<code>%APPDATA%\\CatPrinterDriver\\history</code>, höchstens 30 Aufträge), damit du sie ansehen und nochmal drucken kannst. Standardmäßig aus. <strong>Beim Ausschalten wird der Verlauf gelöscht.</strong>",
+    shareNetwork: "Im Heimnetz freigeben (Drucken vom Handy)",
+    shareNetworkHelp: "Macht den Drucker für Handys und andere Geräte im selben WLAN sichtbar (Android: „Standard-Druckdienst“). Nur Drucken ist aus dem Netz erreichbar – Statusseite, Einstellungen und Verlauf bleiben auf diesem PC. Beim ersten Einschalten fragt Windows nach Adminrechten für die Firewall. Jeder im Heimnetz kann dann drucken.",
+    matchTone: "Fotos vom Handy aufhellen wie am PC",
+    matchToneHelp: "Windows hellt beim Drucken die Schatten von Fotos auf, Handys nicht – ohne Ausgleich werden Handy-Fotos deutlich dunkler. Betrifft nur Fotos, nicht Text und Grafik.",
+    comPort: "COM-Port", automatic: "automatisch", btName: "Bluetooth-Name beginnt mit",
+    connectionHelp: "COM-Port leer lassen, um den Drucker automatisch über seinen Bluetooth-Namen zu finden. Druckeradresse für Windows:",
+    discard: "Verwerfen", save: "Speichern", unsaved: "Nicht gespeicherte Änderungen",
+    saved: "Gespeichert – gilt ab dem nächsten Druck", errorCode: "Fehler {0}",
+    footer: "CatPrinterDriver · aktualisiert sich automatisch · Änderungen gelten sofort und werden in config.json gespeichert",
+  },
+  en: {
+    subtitle: "Bluetooth thermal printer · 58 mm", connecting: "Connecting …", serverDown: "Server not reachable",
+    ready: "Ready", printing: "Printing …", cooling: "Too hot – cooling down …", error: "Error",
+    jobDone: "Printed", jobPrinting: "Printing", jobPending: "Waiting", jobFailed: "Failed", jobCanceled: "Canceled",
+    battery: "Battery", connection: "Connection", printed: "Printed", notMeasured: "not measured yet",
+    measuring: "measuring …", measuredAt: "measured {0}", battCritical: "almost empty – charge via USB now ({0})",
+    battLow: "low – please charge soon ({0})", charging: "charging …", full: "full", atCharger: "on the charger · ",
+    chargingVoltage: "charging voltage {0} · ", automaticPort: "Automatic", bluetoothSerial: "Bluetooth (serial)",
+    portSearched: "COM port is found on the first print", since: "since {0}", minutes: "{0} min",
+    hours: "{0} h", days: "{0} days", lastError: "Last error: {0}",
+    sharedOnNetwork: "Shared on your home network", netSetup: "– setting up …",
+    netHow: "· Phone on the same Wi-Fi → Print → choose printer “{0}” · {1}", netNoAddr: "· no home network address found",
+    netFirewall: "Firewall rule missing – switch sharing off and on again in the settings.",
+    netPublic: "A network is set to “Public” – phones can't reach the printer there (Windows: network profile “Private”).",
+    netAdvert: "Network announcement failed: {0}", unknown: "unknown",
+    printTestPage: "Print test page", checkBattery: "Check battery", jobs: "Print jobs", noJobs: "No jobs yet",
+    page: "page", pages: "pages", history: "History", deleteAll: "Delete all", close: "Close",
+    previewHint: "Preview with the current settings", printAgain: "Print again", delete: "Delete",
+    view: "View", preview: "Preview", historyOff: "History is off – printed jobs are not stored.",
+    enableInSettings: "Turn it on in the settings", historyEmpty: "Nothing stored yet – the next print will appear here.",
+    confirmClear: "Delete all stored jobs?",
+    confirmHistoryOff: "Turn off the history? All {0} stored jobs will be deleted.",
+    settings: "Settings", settingsHint: "Density, image mode, feed, battery, connection",
+    density: "Print density", printSample: "Print sample",
+    densityHelp: "Heat strength. Higher = darker, but fine details fill in more easily. Tested: 40. WalkPrint uses 25.",
+    imageMode: "Image mode", modeAuto: "Automatic – sharp text, dithered photos",
+    modeText: "Text – hard threshold, everything crisp", modePhoto: "Photo – everything dithered",
+    imageModeHelp: "Applies to print quality “Normal”. “Draft” always prints as text, “High” always as photo.",
+    photoBrightness: "Photo brightness",
+    photoBrightnessHelp: "Lightens the mid-tones of photos (black and white stay). Thermal dots spread a little, so photos often look darker than on screen. Text and graphics are not affected. Compare values with “Print again” in the history.",
+    feed: "Paper feed after printing", feedHelp: "So the end of the print clears the tear-off edge.",
+    batteryCheck: "Check battery automatically", off: "off", every15: "every 15 minutes", every30: "every 30 minutes",
+    every60: "every hour", every120: "every 2 hours", warnFrom: "warn at",
+    batteryCheckHelp: "Reads the battery level while nothing is printing (if the printer is off, nothing happens). It is measured after every print anyway. Warns once at “low” and once at “almost empty” (5 %), detects charging via USB and reports when the battery is full. The level is estimated from the voltage.",
+    rotate: "Rotate 180° (readable from the printer's face)", trim: "Trim blank space at the end of the page",
+    keepHistory: "History: keep printed jobs",
+    keepHistoryHelp: "Stores a copy of every printed page on this PC (<code>%APPDATA%\\CatPrinterDriver\\history</code>, up to 30 jobs) so you can view and print them again. Off by default. <strong>Turning it off deletes the history.</strong>",
+    shareNetwork: "Share on home network (print from phones)",
+    shareNetworkHelp: "Makes the printer visible to phones and other devices on the same Wi-Fi (Android: “Default Print Service”). Only printing is reachable from the network – status page, settings and history stay on this PC. The first time, Windows asks for admin rights for the firewall. Anyone on your home network can then print.",
+    matchTone: "Lighten phone photos like on the PC",
+    matchToneHelp: "Windows lightens photo shadows when printing, phones don't – without this, phone photos come out noticeably darker. Only affects photos, not text and graphics.",
+    comPort: "COM port", automatic: "automatic", btName: "Bluetooth name starts with",
+    connectionHelp: "Leave the COM port empty to find the printer automatically by its Bluetooth name. Printer address for Windows:",
+    discard: "Discard", save: "Save", unsaved: "Unsaved changes",
+    saved: "Saved – applies from the next print", errorCode: "Error {0}",
+    footer: "CatPrinterDriver · updates automatically · changes apply immediately and are saved in config.json",
+  },
+};
+
+function pickLang() {
+  try {
+    const stored = localStorage.getItem("catprinter-lang");
+    if (stored === "de" || stored === "en") return stored;
+  } catch { /* Speicher nicht verfügbar */ }
+  return (navigator.language || "en").toLowerCase().startsWith("de") ? "de" : "en";
+}
+let lang = pickLang();
+
+function t(key, ...args) {
+  const text = (I18N[lang] && I18N[lang][key]) ?? I18N.de[key] ?? key;
+  return text.replace(/\{(\d)\}/g, (_m, i) => args[Number(i)] ?? "");
+}
+function locale() { return lang === "de" ? "de-DE" : "en-GB"; }
+function num(v, digits) {
+  return Number(v).toLocaleString(locale(), { minimumFractionDigits: digits, maximumFractionDigits: digits });
+}
+
+function applyStatic() {
+  document.documentElement.lang = lang;
+  document.querySelectorAll("[data-i18n]").forEach((e) => { e.textContent = t(e.dataset.i18n); });
+  document.querySelectorAll("[data-i18n-html]").forEach((e) => { e.innerHTML = t(e.dataset.i18nHtml); });
+  document.querySelectorAll("[data-i18n-placeholder]").forEach((e) => { e.placeholder = t(e.dataset.i18nPlaceholder); });
+  document.querySelectorAll("[data-i18n-aria]").forEach((e) => { e.setAttribute("aria-label", t(e.dataset.i18nAria)); });
+  document.querySelectorAll(".lang button").forEach((b) => b.classList.toggle("active", b.dataset.lang === lang));
+}
+function setLang(l) {
+  lang = l;
+  try { localStorage.setItem("catprinter-lang", l); } catch { /* egal */ }
+  applyStatic();
+  historyKey = "";  // Verlauf in der neuen Sprache neu zeichnen
+  if (lastStatus) render(lastStatus);
+  if (lastHistory) renderHistory(lastHistory);
+  if (dirty) setMsg(t("unsaved"));
+}
+document.querySelectorAll(".lang button").forEach((b) => { b.onclick = () => setLang(b.dataset.lang); });
+
+const JOB = { done: "jobDone", printing: "jobPrinting", pending: "jobPending", failed: "jobFailed", canceled: "jobCanceled" };
 let saved = null;   // Einstellungen laut Server
 let dirty = false;  // ungespeicherte Änderungen im Formular?
+let lastStatus = null, lastHistory = null;
 
 function fillForm(s) {
   $("f-density").value = s.density;
@@ -462,7 +596,7 @@ function setMsg(text, cls) {
 function updateDirty() {
   dirty = Object.keys(changes()).length > 0;
   $("btn-save").disabled = $("btn-reset").disabled = !dirty;
-  if (dirty) setMsg("Nicht gespeicherte Änderungen");
+  if (dirty) setMsg(t("unsaved"));
 }
 async function post(name, data) {
   const r = await fetch("action/" + name, {
@@ -471,20 +605,21 @@ async function post(name, data) {
     body: JSON.stringify(data || {}),
   });
   const body = await r.json().catch(() => ({}));
-  if (!r.ok) throw new Error(body.error || "Fehler " + r.status);
+  if (!r.ok) throw new Error(body.error || t("errorCode", r.status));
   return body;
 }
 
 function fmtTime(epoch) {
   const d = new Date(epoch * 1000), now = new Date();
-  const t = d.toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" });
-  return d.toDateString() === now.toDateString() ? t : d.toLocaleDateString("de-DE") + " " + t;
+  const time = d.toLocaleTimeString(locale(), { hour: "2-digit", minute: "2-digit" });
+  return d.toDateString() === now.toDateString() ? time : d.toLocaleDateString(locale()) + " " + time;
 }
 function fmtUptime(s) {
-  if (s < 3600) return Math.max(1, Math.round(s / 60)) + " Min.";
-  if (s < 86400) return Math.round(s / 3600) + " Std.";
-  return Math.round(s / 86400) + " Tagen";
+  if (s < 3600) return t("minutes", Math.max(1, Math.round(s / 60)));
+  if (s < 86400) return t("hours", Math.round(s / 3600));
+  return t("days", Math.round(s / 86400));
 }
+function pagesText(n) { return n + " " + (n === 1 ? t("page") : t("pages")); }
 function el(tag, cls, text) {
   const e = document.createElement(tag);
   if (cls) e.className = cls;
@@ -492,82 +627,84 @@ function el(tag, cls, text) {
   return e;
 }
 
-function renderNetwork(n) {
+function renderNetwork(n, name) {
   $("netinfo").hidden = !n.enabled;
   if (!n.enabled) return;
   if (!n.addresses) {
-    $("net-text").textContent = "– wird eingerichtet …";
+    $("net-text").textContent = t("netSetup");
     $("net-warn").hidden = true;
     return;
   }
   $("net-text").textContent = n.addresses.length
-    ? "· Handy im selben WLAN → Drucken → Drucker „" + (n.name || s_name) + "“ wählen · " + n.addresses.join(", ") + ":" + n.port
-    : "· keine Heimnetz-Adresse gefunden";
+    ? t("netHow", n.name || name, n.addresses.join(", ") + ":" + n.port)
+    : t("netNoAddr");
   const warn = [];
-  if (n.firewall === false) warn.push("Firewall-Regel fehlt – im Einstellungsbereich die Freigabe aus- und wieder einschalten.");
-  if (n.profiles && Object.values(n.profiles).includes("Public"))
-    warn.push("Ein Netzwerk ist als „öffentlich“ eingestuft – dort erreichen Handys den Drucker nicht (Windows: Netzwerkprofil „Privat“).");
-  if (n.advertised === false) warn.push("Bekanntgabe im Netz fehlgeschlagen: " + (n.error || "unbekannt"));
+  if (n.firewall === false) warn.push(t("netFirewall"));
+  if (n.profiles && Object.values(n.profiles).includes("Public")) warn.push(t("netPublic"));
+  if (n.advertised === false) warn.push(t("netAdvert", n.error || t("unknown")));
   $("net-warn").textContent = warn.join(" ");
   $("net-warn").hidden = !warn.length;
 }
-let s_name = "Cat Printer";
 
-function render(s) {
-  s_name = s.name;
-  $("name").textContent = s.name;
-  document.title = s.name + " – " + STATE[s.state];
-  const pill = $("pill");
-  pill.className = "pill " + s.state;
-  pill.textContent = STATE[s.state];
-  $("alert").hidden = !s.error;
-  $("alert").textContent = s.error ? "Letzter Fehler: " + s.error : "";
-
-  const b = s.battery || {};
+function renderBattery(b, checking) {
   if (b.percent !== undefined) {
     const cls = b.level === "critical" ? "low" : b.level === "low" ? "warnlow" : "";
+    const when = new Date(b.time * 1000).toLocaleTimeString(locale(), { hour: "2-digit", minute: "2-digit" });
+    const volts = num(b.volts, 2) + " V";
     $("volts").textContent = b.percent + " %";
     $("volts").className = "value " + cls;
     $("battery-fill").style.width = b.percent + "%";
     $("battery-fill").className = cls;
-    const when = new Date(b.time * 1000).toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" });
-    const volts = b.volts.toFixed(2).replace(".", ",") + " V";
     $("volts-hint").textContent =
-      b.level === "critical" ? "fast leer – jetzt per USB laden (" + volts + ")" :
-      b.level === "low" ? "schwach – bitte bald laden (" + volts + ")" :
-      volts + " · gemessen " + when;
+      b.level === "critical" ? t("battCritical", volts) :
+      b.level === "low" ? t("battLow", volts) :
+      volts + " · " + t("measuredAt", when);
     if (b.charging) {
       // Am Kabel misst der Drucker die Ladespannung mit – keine (geschönte) Prozentzahl zeigen
-      $("volts").textContent = b.full ? "voll" : "lädt …";
+      $("volts").textContent = b.full ? t("full") : t("charging");
       $("volts").className = "value";
       $("battery-fill").style.width = b.full ? "100%" : "";
       $("battery-fill").className = b.full ? "" : "charging";
-      $("volts-hint").textContent = (b.full ? "am Ladekabel · " : "Ladespannung " + volts + " · ") + "gemessen " + when;
+      $("volts-hint").textContent = (b.full ? t("atCharger") : t("chargingVoltage", volts)) + t("measuredAt", when);
     }
+  } else {
+    $("volts-hint").textContent = t("notMeasured");
   }
-  if (s.checking) $("volts-hint").textContent = "wird gemessen …";
-  $("port").textContent = s.port || "Automatisch";
+  if (checking) $("volts-hint").textContent = t("measuring");
+}
+
+function render(s) {
+  lastStatus = s;
+  $("name").textContent = s.name;
+  document.title = s.name + " – " + t(s.state);
+  const pill = $("pill");
+  pill.className = "pill " + s.state;
+  pill.textContent = t(s.state);
+  $("alert").hidden = !s.error;
+  $("alert").textContent = s.error ? t("lastError", s.error) : "";
+
+  renderBattery(s.battery || {}, s.checking);
+  $("port").textContent = s.port || t("automaticPort");
   $("firmware").textContent = s.firmware ? "Firmware " + s.firmware
-    : (s.port ? "Bluetooth (seriell)" : "COM-Port wird beim ersten Druck gesucht");
+    : (s.port ? t("bluetoothSerial") : t("portSearched"));
   $("count").textContent = s.printed;
-  $("uptime").textContent = "seit " + fmtUptime(s.uptime);
+  $("uptime").textContent = t("since", fmtUptime(s.uptime));
 
   $("url").textContent = s.url;
-  renderNetwork(s.network);
+  renderNetwork(s.network, s.name);
   saved = s.settings;
   if (!dirty) fillForm(saved);
 
   const list = $("jobs");
   list.replaceChildren();
-  if (!s.jobs.length) list.append(el("div", "empty", "Noch keine Aufträge"));
+  if (!s.jobs.length) list.append(el("div", "empty", t("noJobs")));
   for (const j of s.jobs) {
     const row = el("div", "job");
     const info = el("div", "name");
     info.append(el("div", "title", j.name));
-    const pages = j.pages ? " · " + j.pages + (j.pages === 1 ? " Seite" : " Seiten") : "";
-    info.append(el("div", "meta", "#" + j.id + " · " + fmtTime(j.created) + pages));
+    info.append(el("div", "meta", "#" + j.id + " · " + fmtTime(j.created) + (j.pages ? " · " + pagesText(j.pages) : "")));
     if (j.message) info.append(el("div", "msg", j.message));
-    row.append(info, el("span", "badge " + j.state, JOB[j.state]));
+    row.append(info, el("span", "badge " + j.state, t(JOB[j.state])));
     list.append(row);
   }
   $("btn-battery").disabled = s.checking;
@@ -577,9 +714,8 @@ let historyKey = "";   // zuletzt gezeichneter Verlauf (nur neu zeichnen, wenn e
 let historyEntries = [];
 let viewing = null;
 
-function pagesText(n) { return n + (n === 1 ? " Seite" : " Seiten"); }
-
 function renderHistory(h) {
+  lastHistory = h;
   const key = JSON.stringify(h);
   if (key === historyKey) return;
   historyKey = key;
@@ -588,8 +724,8 @@ function renderHistory(h) {
   $("btn-clear").hidden = !h.enabled || !h.entries.length;
   box.replaceChildren();
   if (!h.enabled) {
-    const empty = el("div", "empty", "Der Verlauf ist ausgeschaltet – gedruckte Aufträge werden nicht gespeichert.");
-    const link = el("button", "link", "In den Einstellungen einschalten");
+    const empty = el("div", "empty", t("historyOff"));
+    const link = el("button", "link", t("enableInSettings"));
     link.type = "button";
     link.onclick = openHistorySetting;
     empty.append(document.createElement("br"), link);
@@ -597,16 +733,16 @@ function renderHistory(h) {
     return;
   }
   if (!h.entries.length) {
-    box.append(el("div", "empty", "Noch nichts gespeichert – der nächste Druck erscheint hier."));
+    box.append(el("div", "empty", t("historyEmpty")));
     return;
   }
   for (const e of h.entries) {
     const row = el("div", "hist");
     const thumb = el("button", "thumb");
     thumb.type = "button";
-    thumb.title = "Ansehen";
+    thumb.title = t("view");
     const img = el("img");
-    img.alt = "Vorschau " + e.name;
+    img.alt = t("preview") + " " + e.name;
     img.loading = "lazy";
     img.src = "history/" + e.id + "/1.png?thumb=1";
     thumb.append(img);
@@ -615,15 +751,15 @@ function renderHistory(h) {
     info.append(el("div", "title", e.name));
     info.append(el("div", "meta", fmtTime(e.created) + " · " + pagesText(e.pages)));
     const buttons = el("div", "buttons");
-    const again = el("button", "small", "Nochmal drucken");
+    const again = el("button", "small", t("printAgain"));
     again.type = "button";
     again.onclick = () => reprint(e.id, again);
-    const del = el("button", "small danger", "Löschen");
+    const del = el("button", "small danger", t("delete"));
     del.type = "button";
     del.onclick = () => removeEntry(e.id, del);
     buttons.append(again, del);
     const badgeState = e.state === "failed" ? "failed" : e.state === "done" ? "done" : "pending";
-    row.append(thumb, info, el("span", "badge " + badgeState, JOB[badgeState]), buttons);
+    row.append(thumb, info, el("span", "badge " + badgeState, t(JOB[badgeState])), buttons);
     box.append(row);
   }
 }
@@ -643,7 +779,7 @@ function openViewer(e) {
   pages.replaceChildren();
   for (let n = 1; n <= e.pages; n++) {
     const img = el("img");
-    img.alt = "Seite " + n;
+    img.alt = t("page") + " " + n;
     img.src = "history/" + e.id + "/" + n + ".png?t=" + Date.now();
     pages.append(img);
   }
@@ -669,7 +805,7 @@ async function removeEntry(id, button) {
   try { await post("history-delete", { id }); } finally { loadHistory(); }
 }
 $("btn-clear").onclick = async () => {
-  if (!confirm("Alle gespeicherten Aufträge löschen?")) return;
+  if (!confirm(t("confirmClear"))) return;
   await post("history-clear");
   loadHistory();
 };
@@ -686,7 +822,7 @@ async function refresh() {
     render(await r.json());
   } catch {
     $("pill").className = "pill offline";
-    $("pill").textContent = "Server nicht erreichbar";
+    $("pill").textContent = t("serverDown");
   }
 }
 
@@ -716,15 +852,14 @@ $("settings").onsubmit = async (e) => {
   const diff = changes();
   if (!Object.keys(diff).length) return;
   if (diff.keep_history === false && historyEntries.length &&
-      !confirm("Verlauf ausschalten? Alle " + historyEntries.length + " gespeicherten Aufträge werden gelöscht.")) return;
+      !confirm(t("confirmHistoryOff", historyEntries.length))) return;
   $("btn-save").disabled = true;
   try {
     await post("settings", diff);
     dirty = false;
-    setMsg("Gespeichert – gilt ab dem nächsten Druck", "ok");
     await refresh();
     updateDirty();
-    setMsg("Gespeichert – gilt ab dem nächsten Druck", "ok");
+    setMsg(t("saved"), "ok");
   } catch (err) {
     setMsg(err.message, "err");
     $("btn-save").disabled = false;
@@ -732,6 +867,8 @@ $("settings").onsubmit = async (e) => {
 };
 $("btn-save").disabled = $("btn-reset").disabled = true;
 
+applyStatic();
+$("jobs").append(el("div", "empty", t("noJobs")));
 refresh();
 setInterval(refresh, 3000);
 </script>
