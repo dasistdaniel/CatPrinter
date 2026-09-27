@@ -1,5 +1,7 @@
 # CatPrinterDriver
 
+[![Tests](https://github.com/dasistdaniel/CatPrinterDriver/actions/workflows/tests.yml/badge.svg)](https://github.com/dasistdaniel/CatPrinterDriver/actions/workflows/tests.yml)
+
 Use a cheap Bluetooth "cat printer" (YHK-series mini thermal printer, normally
 used with the **WalkPrint** phone app) as a regular Windows 11 printer – it
 shows up in the print dialog of every application.
@@ -309,6 +311,10 @@ python -m unittest discover tests
 The tests need no printer: they cover the IPP codec, the PWG raster decoder
 (round trip), the ESC/POS job builder and a full IPP print job against the
 server with a fake printer.
+
+GitHub Actions (`.github/workflows/tests.yml`) runs them on Windows with
+Python 3.12 and 3.14 for every push and pull request, then builds the exe
+with `build.ps1` and keeps it as a downloadable artifact for 14 days.
 
 | File | Content |
 |---|---|

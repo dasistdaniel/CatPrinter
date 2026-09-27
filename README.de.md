@@ -1,5 +1,7 @@
 # CatPrinterDriver (Deutsch)
 
+[![Tests](https://github.com/dasistdaniel/CatPrinterDriver/actions/workflows/tests.yml/badge.svg)](https://github.com/dasistdaniel/CatPrinterDriver/actions/workflows/tests.yml)
+
 Macht einen günstigen Bluetooth-„Cat Printer“ (YHK-Mini-Thermodrucker, sonst
 mit der Handy-App **WalkPrint** benutzt) zu einem normalen Windows-11-Drucker,
 der in jedem Programm im Druckdialog auftaucht.
@@ -311,6 +313,10 @@ python -m unittest discover tests
 
 Laufen ohne Drucker (IPP-Codec, PWG-Raster, ESC/POS-Aufbau, kompletter
 IPP-Druckauftrag gegen den Server mit Attrappe).
+
+GitHub Actions (`.github/workflows/tests.yml`) führt sie bei jedem Push und
+Pull Request unter Windows mit Python 3.12 und 3.14 aus, baut danach mit
+`build.ps1` die exe und hält sie 14 Tage lang zum Herunterladen bereit.
 
 ## Lizenz
 
