@@ -250,6 +250,7 @@ tray menu afterwards.
 | Problem | Cause / fix |
 |---|---|
 | Job fails after ~20 s | Printer is off, battery empty, or connected to the phone (Bluetooth serial allows only one connection). The job is aborted and doesn't block the queue. |
+| WalkPrint app can't connect right after a print | Cat Printer keeps the Bluetooth connection open for 90 s after the last print (reconnecting while it prints would cut off the end). Wait a moment or quit Cat Printer from the tray menu. |
 | Jobs stay "printing" forever | The server isn't running (no cat icon in the notification area) – start it or set up the autostart. |
 | `Add-Printer`: access denied | Run PowerShell as Administrator. |
 | Output too light | Charge the battery; raise `density` (see `calibrate`). |

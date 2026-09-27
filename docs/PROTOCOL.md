@@ -19,11 +19,19 @@ versions may behave differently.
 - The baud rate setting is irrelevant for Bluetooth serial ports (115200 used).
 - **Only one connection at a time.** If the phone app is connected, opening
   the port fails.
-- **Reconnect delay:** right after the port is closed, the printer refuses a
+- **Reconnect delay** (relevant after the idle timeout): right after the port is closed, the printer refuses a
   new connection for a few seconds (`OSError 22 / 1167 "device not connected"`).
   The driver retries 3× with 3 s pause.
 - **Printer off:** opening the port fails after ~5 s with
   `OSError 22 / 121 "semaphore timeout"`.
+- **Keep the connection open between jobs.** Reconnecting while the printer
+  is still printing the previous job cut off the rest of that job and left a
+  white line in the image (seen with several photos queued). The printer
+  gives no "finished" signal – `1E 47 03`, `1D 67 69` and `DLE EOT` are all
+  answered immediately, even with a full buffer. The driver therefore keeps
+  the connection open and only closes it after 90 s without a job.
+- With jobs back to back, the printer's buffer fills up and writes block for
+  up to ~13 s (flow control) – normal, not an error.
 - RFCOMM has its own credit-based flow control. Sending a 24 KB job without
   any pauses took 0.3 s and printed correctly. The driver still paces writes
   (256 bytes / 30 ms ≈ 8 KB/s) as a precaution for very long jobs.
@@ -77,8 +85,9 @@ versions may behave differently.
   the print had finished, then went back to `0x12`. No temperature value is
   reported. The driver therefore checks the bit before each job and waits
   (polling every 5 s, max. 4 min) instead of letting the printer pause in the
-  middle of an image, uses a 300 s write timeout, and reports a pause detected
-  by a blocked write (> 3 s).
+  middle of an image, uses a 300 s write timeout, and reports a heat pause
+  when a write blocks for more than 30 s (shorter blocks are just a full
+  buffer) or the bit is set after a job.
 - Battery voltage drops noticeably during long sessions (7.28 V → 6.98 V in
   ~20 minutes of testing), and prints get lighter with it.
 - **USB is charge-only.** When plugged into a PC, Windows reports

@@ -250,6 +250,7 @@ starten* wählen):
 | Problem | Ursache / Lösung |
 |---|---|
 | Auftrag bricht nach ca. 20 s ab | Drucker aus, Akku leer oder mit dem Handy verbunden (nur eine Bluetooth-Verbindung möglich). Die Warteschlange bleibt nicht hängen. |
+| WalkPrint-App verbindet sich direkt nach einem Druck nicht | Cat Printer hält die Bluetooth-Verbindung nach dem letzten Druck 90 Sekunden offen (ein neuer Verbindungsaufbau während des Drucks würde das Ende abschneiden). Kurz warten oder Cat Printer über das Tray-Menü beenden. |
 | Aufträge hängen dauerhaft | Server läuft nicht (kein Katzen-Symbol im Infobereich) – starten oder Autostart einrichten. |
 | `Add-Printer`: Zugriff verweigert | PowerShell als Administrator starten. |
 | Druck zu blass | Akku laden; `density` erhöhen (mit `calibrate` testen). |

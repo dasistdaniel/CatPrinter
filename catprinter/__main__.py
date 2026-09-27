@@ -115,6 +115,8 @@ def main():
                           feed if i == len(values) - 1 else 2, v)
                 for i, v in enumerate(values))
             printer.send(job)
+        # Vor dem Trennen warten, bis der Drucker seinen Puffer abgearbeitet hat
+        printer.close(linger=0 if args.command == "status" else 8)
     except PrinterError as e:
         print("Fehler:", e, file=sys.stderr)
         return 1

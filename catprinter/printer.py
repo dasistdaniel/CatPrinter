@@ -17,10 +17,13 @@ DEFAULT_DENSITY = 40   # per Kalibrierung ermittelt (WalkPrint schickt 25 = 1D 4
 CHUNK = 256            # Bytes pro Schreibvorgang
 CHUNK_DELAY = 0.03     # Pause zwischen Schreibvorgängen (Puffer des Druckers)
 WRITE_TIMEOUT = 300    # Hitzepause des Druckers: Schreiben blockiert, gemessen ~80 s
-STALL_SECONDS = 3      # blockiert ein Schreibvorgang so lange, pausiert der Drucker
+# Blockiertes Senden ist meist nur ein voller Puffer (Bluetooth bremst, gemessen bis ~13 s,
+# wenn Aufträge direkt aufeinander folgen). Eine Hitzepause dauert deutlich länger (~80 s).
+STALL_SECONDS = 30     # blockiert ein Schreibvorgang so lange, pausiert der Drucker wegen Hitze
 HOT_BIT = 0x40         # DLE EOT 3: Druckkopf zu heiß
 COOL_POLL = 5          # Sekunden zwischen Abfragen beim Abkühlen
 COOL_MAX_WAIT = 240    # höchstens so lange vor einem Druck warten
+IDLE_CLOSE = 90        # Verbindung erst nach so vielen Sekunden ohne Auftrag trennen
 
 
 class PrinterError(Exception):
@@ -200,6 +203,7 @@ class Printer:
         self.chunk_delay = CHUNK_DELAY
         self.last_status = {}
         self.last_hot = False
+        self._ser = None
 
     def _resolve_port(self):
         if self.port:
@@ -227,61 +231,109 @@ class Printer:
         time.sleep(0.8)
         return ser
 
+    # Die Verbindung bleibt zwischen Aufträgen offen. Ein neuer Verbindungsaufbau, während
+    # der Drucker noch den vorigen Auftrag druckt, schneidet dessen Ende ab (gemessen:
+    # mehrere Fotos hintereinander, jeweils der Rest fehlte). Der Drucker meldet nicht,
+    # wann er fertig ist – deshalb trennt der Server erst nach einer Ruhezeit (close()).
+
+    def _connection(self):
+        """Offene Verbindung wiederverwenden oder neu öffnen. Gibt (ser, neu) zurück."""
+        if self._ser is not None and self._ser.is_open:
+            return self._ser, False
+        self._ser = self._open()
+        return self._ser, True
+
+    def close(self, linger=0):
+        """Verbindung trennen; linger = vorher warten, bis der Drucker fertig ist."""
+        if self._ser is None:
+            return
+        if linger:
+            time.sleep(linger)
+        try:
+            self._ser.close()
+        except (serial.SerialException, OSError):
+            pass
+        self._ser = None
+        log.info("Bluetooth-Verbindung getrennt")
+
     def status(self):
         """Fragt Firmware/Akku ab, z. B. {'HV': 'H1.0', 'SV': 'V1.01', 'VOLT': '7260mv', 'DPI': '384'}."""
-        with self._open() as ser:
+        ser, _new = self._connection()
+        try:
             self.last_status = _query_status(ser)
+        except serial.SerialException as e:
+            self.close()
+            raise PrinterError(f"Verbindung zum Drucker verloren: {e}") from e
         return self.last_status
 
     def print_images(self, images, feed_mm=15, density=DEFAULT_DENSITY, notify=None):
         self.send(build_job(images, feed_mm, density), notify)
+
+    def _ready_connection(self, notify):
+        """Verbindung holen und prüfen; eine alte, inzwischen tote Verbindung neu aufbauen."""
+        ser, new = self._connection()
+        try:
+            hot = is_hot(ser)
+        except serial.SerialException:
+            hot = None
+        if hot is None and not new:
+            # Keine Antwort über die alte Verbindung (Drucker aus/an, Handy war dran): neu verbinden
+            log.info("Alte Verbindung antwortet nicht – verbinde neu")
+            self.close()
+            ser, _new = self._connection()
+            hot = is_hot(ser)
+        if hot:
+            self._wait_until_cool(ser, notify)
+        return ser
 
     def send(self, job, notify=None):
         """Sendet einen Auftrag. notify(ereignis) meldet Hitze:
         "cooling" (wartet vor dem Druck), "cooled", "paused_hot" (Pause mitten im Druck)."""
         notify = notify or (lambda _e: None)
         log.info("Sende %d Bytes (Pause %.0f ms je %d Bytes)", len(job), self.chunk_delay * 1000, CHUNK)
-        with self._open() as ser:
-            try:
-                self._wait_until_cool(ser, notify)
-                start = time.monotonic()
-                slowest = 0.0
-                paused = False
-                for i in range(0, len(job), CHUNK):
-                    t = time.monotonic()
-                    ser.write(job[i:i + CHUNK])
-                    ser.flush()
-                    took = time.monotonic() - t
-                    slowest = max(slowest, took)
-                    if took > STALL_SECONDS and not paused:
-                        # Drucker nimmt nichts mehr an: Hitzeschutz hat mitten im Druck angehalten
-                        paused = True
-                        log.warning("Drucker pausiert mitten im Druck (vermutlich zu heiß)")
-                        notify("paused_hot")
-                    if self.chunk_delay:
-                        time.sleep(self.chunk_delay)
-                    if ser.in_waiting:
-                        log.debug("Drucker meldet: %r", ser.read(ser.in_waiting))
-                elapsed = time.monotonic() - start
-                log.info("Übertragen in %.1f s (%.1f KB/s), längster Schreibvorgang %.0f ms",
-                         elapsed, len(job) / 1024 / max(elapsed, 0.001), slowest * 1000)
-                # Genug Zeit lassen, bis der Drucker seinen Puffer abgearbeitet hat
-                time.sleep(2.0)
-            except serial.SerialException as e:
-                raise PrinterError(f"Verbindung während des Drucks abgebrochen: {e}") from e
-            # Akkustand gleich über dieselbe Verbindung mitnehmen (ohne neuen Verbindungsaufbau)
-            try:
-                self.last_status = _query_status(ser) or self.last_status
-                self.last_hot = is_hot(ser)
-                if self.last_hot:
-                    log.info("Druckkopf nach dem Druck heiß")
-            except serial.SerialException:
-                pass
+        try:
+            ser = self._ready_connection(notify)
+        except serial.SerialException as e:
+            self.close()
+            raise PrinterError(f"Keine Verbindung zum Drucker: {e}") from e
+        try:
+            start = time.monotonic()
+            slowest = 0.0
+            paused = False
+            for i in range(0, len(job), CHUNK):
+                t = time.monotonic()
+                ser.write(job[i:i + CHUNK])
+                ser.flush()
+                took = time.monotonic() - t
+                slowest = max(slowest, took)
+                if took > STALL_SECONDS and not paused:
+                    # Drucker nimmt nichts mehr an: Hitzeschutz hat mitten im Druck angehalten
+                    paused = True
+                    log.warning("Drucker pausiert mitten im Druck (vermutlich zu heiß)")
+                    notify("paused_hot")
+                if self.chunk_delay:
+                    time.sleep(self.chunk_delay)
+                if ser.in_waiting:
+                    log.debug("Drucker meldet: %r", ser.read(ser.in_waiting))
+            elapsed = time.monotonic() - start
+            log.info("Übertragen in %.1f s (%.1f KB/s), längster Schreibvorgang %.0f ms",
+                     elapsed, len(job) / 1024 / max(elapsed, 0.001), slowest * 1000)
+        except serial.SerialException as e:
+            self.close()
+            raise PrinterError(f"Verbindung während des Drucks abgebrochen: {e}") from e
+        # Akkustand gleich über dieselbe Verbindung mitnehmen
+        try:
+            self.last_status = _query_status(ser) or self.last_status
+            self.last_hot = bool(is_hot(ser))
+            if self.last_hot:
+                log.info("Druckkopf nach dem Druck heiß")
+                if not paused:
+                    notify("paused_hot")  # Hitzeschutz greift – melden, auch ohne lange Blockade
+        except serial.SerialException:
+            pass
 
     def _wait_until_cool(self, ser, notify):
         """Vor dem Druck: Ist der Kopf noch heiß, abwarten statt mitten im Bild zu pausieren."""
-        if not is_hot(ser):
-            return
         log.info("Druckkopf heiß – warte vor dem Druck (max. %d s)", COOL_MAX_WAIT)
         notify("cooling")
         start = time.monotonic()
@@ -297,6 +349,7 @@ def is_hot(ser):
     """Hitzeschutz aktiv? DLE EOT 3 (Fehlerstatus): Bit 0x40 ist gesetzt, solange der Kopf zu heiß ist.
 
     Gemessen: kalt 0x12, nach 5 dunklen Fotos am Stück 0x52; nach ca. 1 Minute wieder 0x12.
+    Gibt None zurück, wenn keine Antwort kommt (Verbindung vermutlich tot).
     """
     ser.reset_input_buffer()
     ser.write(b"\x10\x04\x03")
@@ -304,7 +357,9 @@ def is_hot(ser):
     while time.monotonic() < deadline and not ser.in_waiting:
         time.sleep(0.05)
     reply = ser.read(ser.in_waiting or 0)
-    return bool(reply) and bool(reply[-1] & HOT_BIT)
+    if not reply:
+        return None
+    return bool(reply[-1] & HOT_BIT)
 
 
 def _query_status(ser):

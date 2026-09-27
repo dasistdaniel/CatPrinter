@@ -131,12 +131,20 @@ class PrinterJobTest(unittest.TestCase):
 class FakeSerial:
     """Simulierter Drucker-Port: DLE EOT 3 meldet 'heiß', bis hot_replies aufgebraucht sind."""
 
-    def __init__(self, hot_replies=0, stall_after=None, stall_seconds=0):
+    def __init__(self, hot_replies=0, stall_after=None, stall_seconds=0, hot_after_bytes=None):
         self.hot_replies = hot_replies
+        self.hot_after_bytes = hot_after_bytes
         self.stall_after = stall_after
         self.stall_seconds = stall_seconds
         self.buffer = b""
         self.written = 0
+        self.is_open = True
+        self.closed = 0
+        self.dead = False  # simuliert eine tote alte Verbindung (keine Antworten)
+
+    def close(self):
+        self.is_open = False
+        self.closed += 1
 
     def __enter__(self):
         return self
@@ -159,8 +167,10 @@ class FakeSerial:
         pass
 
     def write(self, data):
+        if self.dead:
+            return
         if data == b"\x10\x04\x03":
-            hot = self.hot_replies > 0
+            hot = self.hot_replies > 0 or (self.hot_after_bytes is not None and self.written > self.hot_after_bytes)
             self.hot_replies -= 1
             self.buffer += b"\x52" if hot else b"\x12"
         elif data == b"\x1e\x47\x03":
@@ -206,6 +216,39 @@ class HeatTest(unittest.TestCase):
     def test_pause_in_the_middle_is_reported(self):
         events = self.run_job(self.make_printer(FakeSerial(stall_after=1000, stall_seconds=0.4)))
         self.assertEqual(events, ["paused_hot"])
+
+    def test_full_buffer_is_not_a_heat_alarm(self):
+        # Kurzes Blockieren = Puffer voll (Bluetooth bremst) – kein "zu heiß"
+        events = self.run_job(self.make_printer(FakeSerial(stall_after=1000, stall_seconds=0.05)))
+        self.assertEqual(events, [])
+
+    def test_hot_after_job_is_reported(self):
+        p = self.make_printer(FakeSerial(hot_after_bytes=1000))
+        self.assertEqual(self.run_job(p), ["paused_hot"])
+        self.assertTrue(p.last_hot)
+
+    def test_connection_kept_between_jobs(self):
+        # Neu verbinden, während der Drucker noch druckt, schneidet das Ende ab – also wiederverwenden
+        fake = FakeSerial()
+        p = self.make_printer(fake)
+        opened = []
+        p._open = lambda: opened.append(1) or fake
+        self.run_job(p)
+        self.run_job(p)
+        self.assertEqual(len(opened), 1)
+        self.assertEqual(fake.closed, 0)
+        p.close()
+        self.assertEqual(fake.closed, 1)
+
+    def test_dead_connection_is_replaced(self):
+        old, new = FakeSerial(), FakeSerial()
+        p = self.make_printer(old)
+        self.run_job(p)
+        old.dead = True  # z. B. Drucker zwischendurch aus- und wieder eingeschaltet
+        p._open = lambda: new
+        self.run_job(p)
+        self.assertEqual(old.closed, 1)
+        self.assertGreater(new.written, 0)
 
     def test_service_shows_cooling(self):
         svc = server.PrintService(dict(server.DEFAULT_CONFIG, uuid="x"))
@@ -328,6 +371,9 @@ class FakePrinter:
 
     def status(self):
         return self.last_status
+
+    def close(self, linger=0):
+        pass
 
 
 class ServiceTest(unittest.TestCase):

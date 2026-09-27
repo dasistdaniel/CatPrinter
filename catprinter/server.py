@@ -16,7 +16,7 @@ from PIL import Image
 from . import ipp, netshare, pwg, statuspage
 from .pages import calibration_page, short_test_page
 from .history import History
-from .printer import (DEFAULT_DENSITY, DPI, MODES, Printer, PrinterError, is_photo_page, photo_brightness,
+from .printer import (DEFAULT_DENSITY, DPI, IDLE_CLOSE, MODES, Printer, PrinterError, is_photo_page, photo_brightness,
                       prepare, scale_to_width, windows_tone)
 
 log = logging.getLogger("server")
@@ -278,8 +278,14 @@ class PrintService:
 
     def _worker(self):
         while True:
-            job = self.queue.get()
+            try:
+                job = self.queue.get(timeout=IDLE_CLOSE)
+            except queue.Empty:
+                # Lange nichts zu tun: der letzte Druck ist sicher fertig – Bluetooth freigeben
+                self.printer.close()
+                continue
             if job is None or self._stopped:
+                self.printer.close()
                 return
             if callable(job):
                 try:
