@@ -14,13 +14,11 @@ from PIL import Image, ImageDraw
 
 from . import netshare
 from .pages import short_test_page
-from .printer import battery_volts
 from .server import CONFIG_DIR, CONFIG_FILE, load_config, save_config, serve
 
 log = logging.getLogger("tray")
 
 LOG_FILE = os.path.join(CONFIG_DIR, "server.log")
-LOW_BATTERY_VOLTS = 6.8
 
 COLORS = {"ready": (46, 160, 67), "printing": (31, 111, 235), "cooling": (224, 150, 20), "error": (218, 54, 51)}
 LABELS = {"ready": "Bereit", "printing": "Druckt …", "cooling": "Zu heiß – kühlt ab …", "error": "Fehler"}
@@ -52,8 +50,6 @@ class TrayApp:
         self.printer_missing = False
         self.state = "ready"
         self.detail = ""
-        self.volts = None
-        self.low_battery_warned = False
         self.httpd = self.service = None
         self.advertiser = None
         self.icon = pystray.Icon("CatPrinter", make_icon("ready"), "Cat Printer", self._menu())
@@ -137,31 +133,32 @@ class TrayApp:
         elif event == "cooled":
             self.set_state("printing", "")
         elif event == "job_done":
-            self.update_battery(data.get("status") or {})
             self.set_state("ready", "")
         elif event == "job_failed":
             self.set_state("error", data["error"])
             self.icon.notify(f"„{data['job'].name}“ wurde nicht gedruckt.\n{_short(data['error'])}",
                              "Druck fehlgeschlagen")
         elif event == "status":
-            self.update_battery(data["status"])
-            self.set_state("ready", "")
-            self.icon.notify(f"Akku: {self.battery_text(short=True)}", "Cat Printer")
+            if data.get("quiet"):
+                self.set_state(self.state, self.detail)  # nur Tooltip/Menü mit neuem Akkustand
+            else:
+                self.set_state("ready", "")
+                self.icon.notify(f"Akku: {self.battery_text(short=True)}", "Cat Printer")
         elif event == "status_failed":
             self.set_state("error", data["error"])
             self.icon.notify(_short(data["error"]), "Drucker nicht erreichbar")
-
-    def update_battery(self, status):
-        volts = battery_volts(status)
-        if volts is None:
-            return
-        self.volts = volts
-        if volts < LOW_BATTERY_VOLTS and not self.low_battery_warned:
-            self.low_battery_warned = True
-            self.icon.notify(f"Akku schwach ({volts:.2f} V) – Drucke werden blasser. "
-                             "Bitte per USB laden.", "Cat Printer")
-        elif volts >= LOW_BATTERY_VOLTS + 0.1:
-            self.low_battery_warned = False
+        elif event == "battery":
+            self.set_state(self.state, self.detail)
+            if data["level"] == "critical":
+                self.icon.notify(f"Akku fast leer ({data['percent']} %) – bitte jetzt per USB laden. "
+                                 "Drucke werden blass, der Drucker kann sich bald abschalten.",
+                                 "Cat Printer: Akku fast leer")
+            else:
+                self.icon.notify(f"Akku schwach ({data['percent']} %) – bitte bald per USB laden, "
+                                 "sonst werden Drucke blasser.", "Cat Printer: Akku schwach")
+        elif event == "battery_full":
+            self.set_state(self.state, self.detail)
+            self.icon.notify("Der Akku ist wieder voll geladen.", "Cat Printer")
 
     def set_state(self, state, detail):
         self.state, self.detail = state, detail
@@ -171,10 +168,19 @@ class TrayApp:
 
     # ------------------------------------------------------------ Menü
 
+    @property
+    def volts(self):
+        return (self.service.battery.get("volts") if self.service else None)
+
     def battery_text(self, short=False):
-        if self.volts is None:
-            return "unbekannt" if short else "Akku: unbekannt (wird beim Drucken gemessen)"
-        text = f"{self.volts:.2f} V".replace(".", ",")
+        b = self.service.battery if self.service else {}
+        if not b:
+            return "unbekannt" if short else "Akku: noch nicht gemessen"
+        text = f"{b['percent']} % ({b['volts']:.2f} V)".replace(".", ",")
+        if b["level"] == "critical":
+            text += " – fast leer!"
+        elif b["level"] == "low":
+            text += " – schwach"
         return text if short else f"Akku: {text}"
 
     def status_text(self):

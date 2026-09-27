@@ -436,6 +436,41 @@ class ServiceTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             server.validate_settings({"photo_brightness": 99})
 
+    def test_battery_percent(self):
+        from catprinter.printer import battery_percent
+        self.assertEqual(battery_percent(8.42), 100)   # voll geladen gemessen
+        self.assertEqual(battery_percent(6.5), 0)
+        self.assertIsNone(battery_percent(None))
+        values = [battery_percent(v / 100) for v in range(660, 845, 5)]
+        self.assertEqual(values, sorted(values))        # steigt mit der Spannung
+        self.assertTrue(10 <= battery_percent(7.25) <= 20)
+
+    def test_battery_warnings_once_per_level(self):
+        svc, events = self.make_service()
+        battery = lambda: [(e, d.get("level")) for e, d in events if e.startswith("battery")]
+        for volts in ("8100", "7280", "7260", "7050", "7000"):
+            svc._update_battery({"VOLT": volts + "mv"})
+        self.assertEqual(battery(), [("battery", "low"), ("battery", "critical")])
+        self.assertEqual(svc.battery["level"], "critical")
+        svc._update_battery({"VOLT": "8420mv"})           # geladen
+        self.assertEqual(battery()[-1], ("battery_full", None))
+        svc._update_battery({"VOLT": "7200mv"})           # entlädt sich wieder (10 %): erneut warnen
+        self.assertEqual(battery()[-1], ("battery", "low"))
+
+    def test_quiet_check_stays_silent_when_printer_off(self):
+        svc, events = self.make_service()
+        def offline():
+            from catprinter.printer import PrinterError
+            raise PrinterError("COM13 lässt sich nicht öffnen")
+        svc.printer.status = offline
+        svc.refresh_status(quiet=True)
+        time.sleep(0.2)
+        self.assertIsNone(svc.last_error)
+        self.assertNotIn("status_failed", [e for e, _d in events])
+        svc.refresh_status()                              # manuell: Fehler anzeigen
+        self.wait_for(events, "status_failed")
+        self.assertIsNotNone(svc.last_error)
+
     def test_battery_volts(self):
         from catprinter.printer import battery_volts
         self.assertEqual(battery_volts({"VOLT": "7180mv"}), 7.18)

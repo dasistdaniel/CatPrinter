@@ -370,6 +370,28 @@ def _query_status(ser):
     return dict(p.split("=", 1) for p in text.split(",") if "=" in p)
 
 
+# Entladekurve einer Li-Ionen-Zelle (Spannung je Zelle -> Ladestand). Der Drucker hat zwei
+# Zellen in Reihe: voll geladen gemessen 8,42 V, nach längerem Drucken ~7,0 V.
+_CELL_CURVE = [(3.30, 0), (3.50, 5), (3.60, 10), (3.65, 20), (3.70, 30), (3.75, 40), (3.80, 50),
+               (3.85, 58), (3.90, 65), (3.95, 72), (4.00, 80), (4.05, 85), (4.10, 90), (4.20, 100)]
+CELLS = 2
+
+
+def battery_percent(volts):
+    """Geschätzter Ladestand in Prozent (grob – die Spannung schwankt mit der Last)."""
+    if volts is None:
+        return None
+    cell = volts / CELLS
+    if cell <= _CELL_CURVE[0][0]:
+        return 0
+    if cell >= _CELL_CURVE[-1][0]:
+        return 100
+    for (v0, p0), (v1, p1) in zip(_CELL_CURVE, _CELL_CURVE[1:]):
+        if v0 <= cell <= v1:
+            return round(p0 + (p1 - p0) * (cell - v0) / (v1 - v0))
+    return None
+
+
 def battery_volts(status):
     """'7180mv' -> 7.18 (oder None)."""
     match = re.match(r"(\d+)\s*mv", str(status.get("VOLT", "")), re.I)

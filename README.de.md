@@ -119,15 +119,26 @@ pip install -r requirements.txt
 
 Die installierte exe (oder `python -m catprinter tray`) führt den
 Druckserver zusammen mit einem Katzen-Symbol im Infobereich der Taskleiste
-aus. Der Punkt zeigt den Zustand: 🟢 bereit · 🔵 druckt · 🔴 Fehler.
+aus. Der Punkt zeigt den Zustand: 🟢 bereit · 🔵 druckt · 🟠 zu heiß, kühlt ab ·
+🔴 Fehler.
 
-Rechtsklick-Menü: Status und Akkuspannung (wird nach jedem Druck gemessen),
-*Testseite drucken*, *Akkustand prüfen*, *Statusseite öffnen* (auch per
-Doppelklick), *Log öffnen*, *Einstellungen bearbeiten*, *Server neu starten*
-(lädt `config.json` neu), *Beenden*.
+Rechtsklick-Menü: Status und Akkustand, *Testseite drucken*, *Akkustand
+prüfen*, *Statusseite öffnen* (auch per Doppelklick), *Log öffnen*,
+*Einstellungen bearbeiten*, *Server neu starten* (lädt `config.json` neu),
+*Beenden*.
 
 Windows-Benachrichtigungen erscheinen, wenn ein Druck fehlschlägt (z. B.
-Drucker aus) und wenn der Akku unter 6,8 V fällt.
+Drucker aus), wenn der Druckkopf zu heiß ist und beim Akku (siehe unten).
+
+### Akkuwarnung
+
+Der Ladestand wird nach jedem Druck gemessen und, solange nichts gedruckt
+wird, **automatisch alle 30 Minuten** (auf der Statusseite einstellbar, 0 =
+aus; ist der Drucker aus, passiert nichts). Der Prozentwert ist aus der
+Spannung des zweizelligen Li-Ionen-Akkus geschätzt (8,4 V = voll) und steht
+im Tray-Tooltip und auf der Statusseite. Benachrichtigungen: einmal bei
+*schwach* (15 %, einstellbar), einmal bei *fast leer* (5 %) und *voll
+geladen* nach dem Laden.
 
 ## Drucken
 
@@ -241,6 +252,8 @@ starten* wählen):
 | `share_network` | `false` | Im Heimnetz freigeben, um vom Handy zu drucken (siehe *Drucken vom Handy*) |
 | `match_windows_tone` | `true` | Schatten von Handy-Fotos aufhellen wie Windows |
 | `photo_brightness` | `0` | Foto-Helligkeit in Prozent (−30 … +50), nur Fotos |
+| `battery_check_minutes` | `30` | Akku alle N Minuten automatisch prüfen, wenn nichts gedruckt wird (0 = aus) |
+| `battery_warn_percent` | `15` | Ab diesem Ladestand warnen |
 | `http_host` / `http_port` | `127.0.0.1` / `631` | Adresse des IPP-Servers |
 | `printer_name` | `"Cat Printer"` | Name gegenüber Windows |
 | `uuid` | zufällig | Identität des Druckers – nicht ändern, sonst hält Windows ihn für ein neues Gerät |

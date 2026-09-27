@@ -18,6 +18,7 @@ def status_dict(service):
         "error": error[1] if error else None,
         "port": service.printer.port,
         "volts": battery_volts(service.status),
+        "battery": service.battery,
         "firmware": service.status.get("SV"),
         "checking": service.checking,
         "settings": {
@@ -32,6 +33,8 @@ def status_dict(service):
             "share_network": bool(cfg.get("share_network", False)),
             "match_windows_tone": bool(cfg.get("match_windows_tone", True)),
             "photo_brightness": int(cfg.get("photo_brightness", 0)),
+            "battery_check_minutes": int(cfg.get("battery_check_minutes", 30)),
+            "battery_warn_percent": int(cfg.get("battery_warn_percent", 15)),
         },
         "network": dict(service.net_status, enabled=bool(cfg.get("share_network", False)),
                         port=cfg["http_port"]),
@@ -104,6 +107,11 @@ h1 { font-size: 24px; margin: 0; line-height: 1.2; }
 .value { font-size: 22px; font-weight: 600; margin-top: 4px; font-variant-numeric: tabular-nums; }
 .hint { color: var(--muted); font-size: 13px; }
 .low { color: var(--err); }
+.warnlow { color: var(--wait); }
+.battery-bar { height: 6px; border-radius: 3px; background: var(--neutral-bg); margin: 6px 0 4px; overflow: hidden; }
+.battery-bar div { height: 100%; width: 0; background: var(--ok); border-radius: 3px; transition: width .3s; }
+.battery-bar div.warnlow { background: var(--wait); }
+.battery-bar div.low { background: var(--err); }
 .netinfo {
   background: var(--busy-bg); color: var(--text); border-radius: 12px;
   padding: 10px 16px; margin-bottom: 16px; font-size: 14px;
@@ -244,7 +252,8 @@ footer { color: var(--muted); font-size: 12px; margin-top: 24px; text-align: cen
     <div class="card">
       <div class="label">Akku</div>
       <div class="value" id="volts">–</div>
-      <div class="hint" id="volts-hint">wird beim Drucken gemessen</div>
+      <div class="battery-bar"><div id="battery-fill"></div></div>
+      <div class="hint" id="volts-hint">noch nicht gemessen</div>
     </div>
     <div class="card">
       <div class="label">Verbindung</div>
@@ -330,6 +339,23 @@ footer { color: var(--muted); font-size: 12px; margin-top: 24px; text-align: cen
       </div>
       <p class="help">Damit das Ende über die Abreißkante kommt.</p>
     </div>
+    <div class="field">
+      <label for="f-battery-check">Akku automatisch prüfen</label>
+      <div class="control">
+        <select id="f-battery-check" name="battery_check_minutes" style="width:auto">
+          <option value="0">aus</option>
+          <option value="15">alle 15 Minuten</option>
+          <option value="30">alle 30 Minuten</option>
+          <option value="60">jede Stunde</option>
+          <option value="120">alle 2 Stunden</option>
+        </select>
+        <span class="unit">warnen ab</span>
+        <input type="number" id="f-battery-warn" name="battery_warn_percent" min="5" max="50" step="5"><span class="unit">%</span>
+      </div>
+      <p class="help">Fragt den Ladestand ab, wenn gerade nichts gedruckt wird (ist der Drucker aus, passiert nichts).
+        Nach jedem Druck wird er ohnehin gemessen. Warnt einmal bei „schwach“ und einmal bei „fast leer“ (5 %),
+        und meldet, wenn der Akku wieder voll ist. Der Ladestand ist aus der Spannung geschätzt.</p>
+    </div>
     <div class="field checks">
       <label class="check"><input type="checkbox" id="f-rotate" name="rotate_180"> Um 180° drehen (vom Druckergesicht aus lesbar)</label>
       <label class="check"><input type="checkbox" id="f-trim" name="trim_bottom"> Weißraum am Seitenende abschneiden</label>
@@ -379,7 +405,6 @@ footer { color: var(--muted); font-size: 12px; margin-top: 24px; text-align: cen
 const $ = (id) => document.getElementById(id);
 const STATE = { ready: "Bereit", printing: "Druckt …", cooling: "Zu heiß – kühlt ab …", error: "Fehler" };
 const JOB = { done: "Gedruckt", printing: "Druckt", pending: "Wartet", failed: "Fehlgeschlagen", canceled: "Abgebrochen" };
-const LOW_VOLTS = 6.8;
 let saved = null;   // Einstellungen laut Server
 let dirty = false;  // ungespeicherte Änderungen im Formular?
 
@@ -396,6 +421,8 @@ function fillForm(s) {
   $("f-share").checked = s.share_network;
   $("f-tone").checked = s.match_windows_tone;
   $("f-bright").value = s.photo_brightness;
+  $("f-battery-check").value = String(s.battery_check_minutes);
+  $("f-battery-warn").value = s.battery_warn_percent;
   $("bright-out").textContent = fmtPercent(s.photo_brightness);
 }
 function fmtPercent(v) { v = Number(v); return (v > 0 ? "+" : "") + v + " %"; }
@@ -412,6 +439,8 @@ function readForm() {
     share_network: $("f-share").checked,
     match_windows_tone: $("f-tone").checked,
     photo_brightness: Number($("f-bright").value),
+    battery_check_minutes: Number($("f-battery-check").value),
+    battery_warn_percent: Number($("f-battery-warn").value),
   };
 }
 function changes() {
@@ -488,10 +517,19 @@ function render(s) {
   $("alert").hidden = !s.error;
   $("alert").textContent = s.error ? "Letzter Fehler: " + s.error : "";
 
-  if (s.volts) {
-    $("volts").textContent = s.volts.toFixed(2).replace(".", ",") + " V";
-    $("volts").classList.toggle("low", s.volts < LOW_VOLTS);
-    $("volts-hint").textContent = s.volts < LOW_VOLTS ? "schwach – bitte per USB laden" : "zuletzt gemessen";
+  const b = s.battery || {};
+  if (b.percent !== undefined) {
+    const cls = b.level === "critical" ? "low" : b.level === "low" ? "warnlow" : "";
+    $("volts").textContent = b.percent + " %";
+    $("volts").className = "value " + cls;
+    $("battery-fill").style.width = b.percent + "%";
+    $("battery-fill").className = cls;
+    const when = new Date(b.time * 1000).toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" });
+    const volts = b.volts.toFixed(2).replace(".", ",") + " V";
+    $("volts-hint").textContent =
+      b.level === "critical" ? "fast leer – jetzt per USB laden (" + volts + ")" :
+      b.level === "low" ? "schwach – bitte bald laden (" + volts + ")" :
+      volts + " · gemessen " + when;
   }
   if (s.checking) $("volts-hint").textContent = "wird gemessen …";
   $("port").textContent = s.port || "Automatisch";

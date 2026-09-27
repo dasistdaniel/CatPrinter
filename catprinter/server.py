@@ -16,7 +16,7 @@ from PIL import Image
 from . import ipp, netshare, pwg, statuspage
 from .pages import calibration_page, short_test_page
 from .history import History
-from .printer import (DEFAULT_DENSITY, DPI, IDLE_CLOSE, MODES, Printer, PrinterError, is_photo_page, photo_brightness,
+from .printer import (DEFAULT_DENSITY, DPI, IDLE_CLOSE, MODES, Printer, battery_percent, battery_volts, PrinterError, is_photo_page, photo_brightness,
                       prepare, scale_to_width, windows_tone)
 
 log = logging.getLogger("server")
@@ -40,8 +40,13 @@ DEFAULT_CONFIG = {
     "share_network": False,    # im Heimnetz freigeben (Drucken vom Handy), standardmäßig aus
     "match_windows_tone": True,  # Fotos vom Handy wie Windows aufhellen (gleiches Ergebnis wie vom PC)
     "photo_brightness": 0,     # Foto-Helligkeit in Prozent (-30 … +50), nur Fotos
+    "battery_check_minutes": 30,  # Akku automatisch prüfen (Minuten, 0 = aus)
+    "battery_warn_percent": 15,   # ab diesem Ladestand warnen
     "printer_name": "Cat Printer",
 }
+
+BATTERY_CRITICAL_PERCENT = 5   # "fast leer"
+BATTERY_LOOP_SECONDS = 60      # so oft nachsehen, ob eine automatische Akkuprüfung fällig ist
 
 # Papiergrößen in 1/100 mm (Breite = bedruckbare 48 mm, ohne Ränder).
 # Größere Formate werden auf 48 mm Breite verkleinert.
@@ -74,6 +79,12 @@ def validate_settings(changes):
         elif key == "feed_mm":
             if isinstance(value, bool) or not isinstance(value, int) or not 0 <= value <= 50:
                 raise ValueError("Vorschub muss eine ganze Zahl von 0 bis 50 mm sein")
+        elif key == "battery_check_minutes":
+            if isinstance(value, bool) or not isinstance(value, int) or not 0 <= value <= 240:
+                raise ValueError("Akkuprüfung: 0 (aus) bis 240 Minuten")
+        elif key == "battery_warn_percent":
+            if isinstance(value, bool) or not isinstance(value, int) or not 5 <= value <= 50:
+                raise ValueError("Akkuwarnung: 5 bis 50 Prozent")
         elif key == "photo_brightness":
             if isinstance(value, bool) or not isinstance(value, int) or not -30 <= value <= 50:
                 raise ValueError("Foto-Helligkeit muss eine ganze Zahl von -30 bis 50 sein")
@@ -182,8 +193,13 @@ class PrintService:
         self.printed = 0      # erfolgreich gedruckte Aufträge seit dem Start
         self.net_status = {}  # Netzwerkfreigabe: Adressen, Firewall, Netzwerkprofil (setzt das Tray)
         self.history = History(os.path.join(os.path.dirname(self.config_file), "history"))
+        self.battery = {}     # volts, percent, level ("ok"/"low"/"critical"), time
+        self._battery_alert = "ok"   # zuletzt gemeldete Warnstufe (jede Stufe nur einmal melden)
+        self._battery_was_low = False  # für "voll geladen" nach dem Laden
+        self._battery_try = 0.0
         self._stopped = False
         threading.Thread(target=self._worker, daemon=True).start()
+        threading.Thread(target=self._battery_loop, daemon=True).start()
 
     def emit(self, event, **data):
         for listener in list(self.listeners):
@@ -196,20 +212,63 @@ class PrintService:
         """Führt fn im Druck-Thread aus – so greift nie mehr als einer gleichzeitig auf den COM-Port zu."""
         self.queue.put(fn)
 
-    def refresh_status(self):
+    def refresh_status(self, quiet=False):
+        """Akku/Firmware abfragen. quiet: automatische Prüfung – bei ausgeschaltetem Drucker
+        keine Fehlermeldung, danach Bluetooth gleich wieder freigeben."""
         def task():
             try:
                 self.status = self.printer.status()
-                self.last_error = None
-                self.emit("status", status=self.status)
+                self.last_error = None if not quiet else self.last_error
+                self._update_battery(self.status)
+                self.emit("status", status=self.status, quiet=quiet)
             except PrinterError as e:
-                self.last_error = (time.time(), str(e))
-                self.emit("status_failed", error=str(e))
+                if quiet:
+                    log.debug("Automatische Akkuprüfung: Drucker nicht erreichbar (%s)", e)
+                else:
+                    self.last_error = (time.time(), str(e))
+                    self.emit("status_failed", error=str(e))
             finally:
                 self.checking = False
+                if quiet and self.queue.empty():
+                    self.printer.close()
         if not self.checking:
             self.checking = True
             self.run_task(task)
+
+    def _update_battery(self, status):
+        """Ladestand auswerten und Warnstufen melden (jede Stufe einmal, bis wieder geladen)."""
+        volts = battery_volts(status)
+        if volts is None:
+            return
+        percent = battery_percent(volts)
+        warn = int(self.cfg.get("battery_warn_percent", 15))
+        level = "critical" if percent <= BATTERY_CRITICAL_PERCENT else "low" if percent <= warn else "ok"
+        self.battery = {"volts": volts, "percent": percent, "level": level, "time": int(time.time())}
+        order = {"ok": 0, "low": 1, "critical": 2}
+        if order[level] > order[self._battery_alert]:
+            self._battery_alert = level
+            self._battery_was_low = True
+            log.warning("Akku %s: %d %% (%.2f V)", "fast leer" if level == "critical" else "schwach",
+                        percent, volts)
+            self.emit("battery", level=level, percent=percent, volts=volts)
+        elif level == "ok" and percent >= warn + 10:
+            self._battery_alert = "ok"  # wieder geladen: nächste Warnung darf wieder kommen
+        if percent >= 98 and self._battery_was_low:
+            self._battery_was_low = False
+            log.info("Akku voll geladen (%.2f V)", volts)
+            self.emit("battery_full", percent=percent, volts=volts)
+
+    def _battery_loop(self):
+        """Prüft den Akku regelmäßig automatisch, wenn gerade nichts gedruckt wird."""
+        while not self._stopped:
+            time.sleep(BATTERY_LOOP_SECONDS)
+            minutes = int(self.cfg.get("battery_check_minutes", 30))
+            if minutes <= 0 or self._stopped or self.active or not self.queue.empty():
+                continue
+            last = max(self.battery.get("time", 0), self._battery_try)
+            if time.time() - last >= minutes * 60:
+                self._battery_try = time.time()
+                self.refresh_status(quiet=True)
 
     def print_image(self, name, img, density=None):
         """Druckt ein PIL-Bild über die normale Auftragsverarbeitung (z. B. Testseite)."""
@@ -307,6 +366,7 @@ class PrintService:
                 log.info("Auftrag %d '%s' gedruckt (%d Seite(n))", job.id, job.name, job.pages)
                 if self.printer.last_status:
                     self.status = self.printer.last_status
+                    self._update_battery(self.status)
                 self.emit("job_done", job=job, status=self.status)
             except Exception as e:  # noqa: BLE001 – jeder Fehler bricht nur diesen Auftrag ab
                 job.state = ABORTED
@@ -441,6 +501,9 @@ def printer_attributes(service, host):
         message = service.last_error[1][:200]
     elif service.cooling:
         message = "Drucker zu heiß – kühlt ab, druckt dann weiter"
+    elif service.battery.get("level") in ("low", "critical"):
+        message = f"Akku {'fast leer' if service.battery['level'] == 'critical' else 'schwach'} " \
+                  f"({service.battery['percent']} %) – bitte per USB laden"
     elif busy:
         message = "Druckt"
     name = cfg.get("printer_name", "Cat Printer")

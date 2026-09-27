@@ -122,14 +122,24 @@ pip install -r requirements.txt
 
 The installed exe (or `python -m catprinter tray`) runs the print server
 together with a cat icon in the notification area. The dot shows the state:
-🟢 ready · 🔵 printing · 🔴 error.
+🟢 ready · 🔵 printing · 🟠 too hot, cooling down · 🔴 error.
 
-Right-click menu: status and battery voltage (measured after every print),
-*Print test page*, *Check battery*, *Open status page* (also on double-click),
-*Open log*, *Edit settings*, *Restart server* (reloads `config.json`), *Quit*.
+Right-click menu: status and battery level, *Print test page*, *Check
+battery*, *Open status page* (also on double-click), *Open log*, *Edit
+settings*, *Restart server* (reloads `config.json`), *Quit*.
 
-Windows notifications appear when a print fails (e.g. printer off) and when
-the battery drops below 6.8 V.
+Windows notifications appear when a print fails (e.g. printer off), when the
+print head is too hot, and for the battery (see below).
+
+### Battery warning
+
+The battery level is measured after every print and, while nothing is
+printing, **automatically every 30 minutes** (adjustable on the status page,
+0 = off; if the printer is off, nothing happens). The percentage is estimated
+from the voltage of the two-cell Li-ion battery (8.4 V = full) and shown in
+the tray tooltip and on the status page. Notifications: once at *low*
+(15 %, adjustable), once at *almost empty* (5 %), and *fully charged* after
+recharging.
 
 ## Printing
 
@@ -241,6 +251,8 @@ tray menu afterwards.
 | `share_network` | `false` | Share on the home network for printing from phones (see *Printing from your phone*) |
 | `match_windows_tone` | `true` | Lighten photo shadows of phone prints like Windows does |
 | `photo_brightness` | `0` | Photo brightness in percent (−30 … +50), photos only |
+| `battery_check_minutes` | `30` | Check the battery automatically every N minutes while idle (0 = off) |
+| `battery_warn_percent` | `15` | Warn when the battery drops to this level |
 | `http_host` / `http_port` | `127.0.0.1` / `631` | Address of the IPP server |
 | `printer_name` | `"Cat Printer"` | Name reported to Windows |
 | `uuid` | random | Printer identity – don't change it, or Windows sees a new device |
