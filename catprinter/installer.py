@@ -126,7 +126,7 @@ def _register_uninstall():
             "Publisher": "dasistdaniel",
             "InstallLocation": INSTALL_DIR,
             "UninstallString": f'"{INSTALLED_EXE}" uninstall',
-            "URLInfoAbout": "https://github.com/dasistdaniel/CatPrinterDriver",
+            "URLInfoAbout": "https://github.com/dasistdaniel/CatPrinter",
         }
         for name, value in values.items():
             winreg.SetValueEx(key, name, 0, winreg.REG_SZ, value)

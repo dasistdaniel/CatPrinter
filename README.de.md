@@ -5,9 +5,9 @@
   </picture>
 </p>
 
-# CatPrinterDriver (Deutsch)
+# CatPrinter (Deutsch)
 
-[![Tests](https://github.com/dasistdaniel/CatPrinterDriver/actions/workflows/tests.yml/badge.svg)](https://github.com/dasistdaniel/CatPrinterDriver/actions/workflows/tests.yml)
+[![Tests](https://github.com/dasistdaniel/CatPrinter/actions/workflows/tests.yml/badge.svg)](https://github.com/dasistdaniel/CatPrinter/actions/workflows/tests.yml)
 
 Macht einen günstigen Bluetooth-„Cat Printer“ (YHK-Mini-Thermodrucker, sonst
 mit der Handy-App **WalkPrint** benutzt) zu einem normalen Windows-11-Drucker,
@@ -53,7 +53,7 @@ gekoppelte Drucker in Windows einen Port *„Standardmäßige Seriell-über-Blue
 ## Installation (Windows-Programm)
 
 1. `CatPrinter.exe` besorgen – von der Seite
-   [Releases](https://github.com/dasistdaniel/CatPrinterDriver/releases), falls vorhanden,
+   [Releases](https://github.com/dasistdaniel/CatPrinter/releases), falls vorhanden,
    oder selbst bauen (siehe *exe bauen*).
 2. Doppelklicken und **Installieren** bestätigen. Das Programm
    - kopiert sich nach `%LOCALAPPDATA%\Programs\CatPrinter` (ohne Adminrechte),
@@ -97,8 +97,8 @@ als Administrator `Remove-Printer "Cat Printer"` ausführen.
 ## Python-Variante (aus dem Quellcode)
 
 ```powershell
-git clone https://github.com/dasistdaniel/CatPrinterDriver.git
-cd CatPrinterDriver
+git clone https://github.com/dasistdaniel/CatPrinter.git
+cd CatPrinter
 pip install -r requirements.txt
 ```
 

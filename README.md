@@ -5,9 +5,9 @@
   </picture>
 </p>
 
-# CatPrinterDriver
+# CatPrinter
 
-[![Tests](https://github.com/dasistdaniel/CatPrinterDriver/actions/workflows/tests.yml/badge.svg)](https://github.com/dasistdaniel/CatPrinterDriver/actions/workflows/tests.yml)
+[![Tests](https://github.com/dasistdaniel/CatPrinter/actions/workflows/tests.yml/badge.svg)](https://github.com/dasistdaniel/CatPrinter/actions/workflows/tests.yml)
 
 Use a cheap Bluetooth "cat printer" (YHK-series mini thermal printer, normally
 used with the **WalkPrint** phone app) as a regular Windows 11 printer – it
@@ -59,7 +59,7 @@ work.
 
 ## Installation (Windows program)
 
-1. Get `CatPrinter.exe` – from the [Releases](https://github.com/dasistdaniel/CatPrinterDriver/releases)
+1. Get `CatPrinter.exe` – from the [Releases](https://github.com/dasistdaniel/CatPrinter/releases)
    page if available, or build it yourself (see *Building the exe*).
 2. Double-click it and confirm **Install**. It
    - copies itself to `%LOCALAPPDATA%\Programs\CatPrinter` (no admin rights needed),
@@ -101,8 +101,8 @@ printer, run `Remove-Printer "Cat Printer"` as administrator.
 ## Running from source (Python)
 
 ```powershell
-git clone https://github.com/dasistdaniel/CatPrinterDriver.git
-cd CatPrinterDriver
+git clone https://github.com/dasistdaniel/CatPrinter.git
+cd CatPrinter
 pip install -r requirements.txt
 ```
 
