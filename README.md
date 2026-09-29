@@ -1,3 +1,10 @@
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/logo/catprinter-horizontal-on-dark.svg">
+    <img src="docs/logo/catprinter-horizontal.svg" alt="Cat Printer" width="420">
+  </picture>
+</p>
+
 # CatPrinterDriver
 
 [![Tests](https://github.com/dasistdaniel/CatPrinterDriver/actions/workflows/tests.yml/badge.svg)](https://github.com/dasistdaniel/CatPrinterDriver/actions/workflows/tests.yml)
@@ -329,6 +336,7 @@ with `build.ps1` and keeps it as a downloadable artifact for 14 days.
 | `catprinter/installer.py` | Install/update/uninstall of the exe |
 | `catprinter/netshare.py` | Home network sharing: access rules, mDNS announcement, firewall |
 | `packaging/`, `build.ps1` | exe entry point, icon generator, build script |
+| `catprinter/logo.py`, `docs/logo/` | Logo: drawn for the tray/exe icon, SVG masters and [usage guide](docs/logo/README.md) |
 | `catprinter/__main__.py` | Command line interface |
 | `autostart.ps1` | Startup-folder shortcut |
 | `docs/PROTOCOL.md` | What was learned about the printer and the Windows IPP client |

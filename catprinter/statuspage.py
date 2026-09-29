@@ -61,7 +61,7 @@ PAGE = r"""<!doctype html>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Cat Printer</title>
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Cpath d='M8 26 12 4l14 12M56 26 52 4 38 16' fill='%23fff' stroke='%23333' stroke-width='3' stroke-linejoin='round'/%3E%3Crect x='6' y='14' width='52' height='42' rx='16' fill='%23fff' stroke='%23333' stroke-width='3'/%3E%3Ccircle cx='21' cy='32' r='3.5' fill='%23333'/%3E%3Ccircle cx='43' cy='32' r='3.5' fill='%23333'/%3E%3Cpath d='M26 42q6 5 12 0' fill='none' stroke='%23333' stroke-width='3' stroke-linecap='round'/%3E%3C/svg%3E">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='40 24 176 212'%3E%3Cpath fill='%23C94F68' fill-rule='evenodd' d='M64,44 Q64,28 76,36 L98,58 Q102,62 108,62 H148 Q154,62 158,58 L180,36 Q192,28 192,44 V232 L176,212 L160,232 L144,212 L128,232 L112,212 L96,232 L80,212 L64,232 Z M80,116 a20,20 0 1 0 40,0 a20,20 0 1 0 -40,0 Z M136,116 a20,20 0 1 0 40,0 a20,20 0 1 0 -40,0 Z M88,164 H168 V184 H88 Z'/%3E%3C/svg%3E">
 <style>
 :root {
   --bg: #f5f3f0; --card: #ffffff; --text: #1f1d1a; --muted: #6b665f; --line: #e6e1da;
@@ -247,13 +247,8 @@ footer { color: var(--muted); font-size: 12px; margin-top: 24px; text-align: cen
 <body>
 <main>
   <header>
-    <svg viewBox="0 0 64 64" aria-hidden="true">
-      <path d="M8 26 12 4l14 12M56 26 52 4 38 16" fill="var(--card)" stroke="var(--text)" stroke-width="2.5" stroke-linejoin="round"/>
-      <rect x="6" y="14" width="52" height="42" rx="16" fill="var(--card)" stroke="var(--text)" stroke-width="2.5"/>
-      <circle cx="21" cy="32" r="3.5" fill="var(--text)"/><circle cx="43" cy="32" r="3.5" fill="var(--text)"/>
-      <ellipse cx="15" cy="40" rx="4" ry="2.5" fill="var(--accent)" opacity=".5"/>
-      <ellipse cx="49" cy="40" rx="4" ry="2.5" fill="var(--accent)" opacity=".5"/>
-      <path d="M26 42q6 5 12 0" fill="none" stroke="var(--text)" stroke-width="2.5" stroke-linecap="round"/>
+    <svg viewBox="40 24 176 212" aria-hidden="true">
+      <path fill="var(--accent)" fill-rule="evenodd" d="M64,44 Q64,28 76,37 L100,57 Q104,61 110,61 H146 Q152,61 156,57 L180,37 Q192,28 192,44 V232 L176,216 L160,232 L144,216 L128,232 L112,216 L96,232 L80,216 L64,232 Z M90,110 a14,14 0 1 0 28,0 a14,14 0 1 0 -28,0 Z M138,110 a14,14 0 1 0 28,0 a14,14 0 1 0 -28,0 Z M88,150 H168 V164 H88 Z M88,178 H144 V192 H88 Z"/>
     </svg>
     <div>
       <h1 id="name">Cat Printer</h1>

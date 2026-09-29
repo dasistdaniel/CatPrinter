@@ -1,3 +1,3 @@
 """Windows-Druckeranbindung für YHK-„Cat Printer“ (Bluetooth-SPP, ESC/POS)."""
 
-__version__ = "0.5.0"
+__version__ = "0.5.1"

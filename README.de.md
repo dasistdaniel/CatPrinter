@@ -1,3 +1,10 @@
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/logo/catprinter-horizontal-on-dark.svg">
+    <img src="docs/logo/catprinter-horizontal.svg" alt="Cat Printer" width="420">
+  </picture>
+</p>
+
 # CatPrinterDriver (Deutsch)
 
 [![Tests](https://github.com/dasistdaniel/CatPrinterDriver/actions/workflows/tests.yml/badge.svg)](https://github.com/dasistdaniel/CatPrinterDriver/actions/workflows/tests.yml)

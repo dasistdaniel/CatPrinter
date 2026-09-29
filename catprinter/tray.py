@@ -10,9 +10,9 @@ import urllib.request
 import webbrowser
 
 import pystray
-from PIL import Image, ImageDraw
+from PIL import ImageDraw
 
-from . import i18n, netshare
+from . import i18n, logo, netshare
 from .i18n import t
 from .pages import short_test_page
 from .server import CONFIG_DIR, CONFIG_FILE, load_config, save_config, serve
@@ -29,16 +29,9 @@ def label(state):
 
 
 def make_icon(state):
-    """Katzengesicht mit farbigem Statuspunkt, 64×64 Pixel."""
-    img = Image.new("RGBA", (64, 64), (0, 0, 0, 0))
+    """Logo (Bon mit Katzenohren) mit farbigem Statuspunkt, 64×64 Pixel."""
+    img = logo.draw(64, small=True, box=(50, 24, 262, 236))
     d = ImageDraw.Draw(img)
-    fur, line = (250, 250, 250, 255), (60, 60, 60, 255)
-    d.polygon([(8, 26), (12, 4), (26, 16)], fill=fur, outline=line, width=2)    # Ohren
-    d.polygon([(56, 26), (52, 4), (38, 16)], fill=fur, outline=line, width=2)
-    d.rounded_rectangle([6, 14, 58, 56], radius=16, fill=fur, outline=line, width=3)
-    d.ellipse([18, 28, 25, 35], fill=line)                                     # Augen
-    d.ellipse([39, 28, 46, 35], fill=line)
-    d.arc([24, 36, 40, 48], start=20, end=160, fill=line, width=3)             # Mund
     d.ellipse([40, 40, 63, 63], fill=COLORS[state] + (255,), outline=(255, 255, 255, 255), width=3)
     return img
 

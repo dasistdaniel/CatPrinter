@@ -595,6 +595,18 @@ class ServiceTest(unittest.TestCase):
         for state in ("ready", "printing", "error"):
             self.assertEqual(make_icon(state).size, (64, 64))
 
+    def test_logo_image(self):
+        from catprinter import logo
+        for size, small in ((16, True), (256, False)):
+            img = logo.draw(size)
+            self.assertEqual(img.size, (size, size))
+            self.assertEqual(img.getpixel((0, 0))[3], 0)                    # Ecke transparent
+            pixel = img.getpixel((size // 2, size - size // 5))             # im Bon (Kantenglättung erlaubt kleine Abweichung)
+            self.assertTrue(all(abs(a - b) <= 12 for a, b in zip(pixel, logo.ROSE + (255,))), pixel)
+        scale = 256 / 216
+        cut = logo.draw(256, features=None)
+        self.assertEqual(cut.getpixel((round((104 - 20) * scale), round((110 - 22) * scale)))[3], 0)  # Auge
+
 
 class ServerTest(unittest.TestCase):
     def setUp(self):
